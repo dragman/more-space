@@ -18,6 +18,8 @@ web-sys = { version = "0.3.67", features = ["console", "Document", "Element", "W
 rand = "0.8"
 rand_chacha = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

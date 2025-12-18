@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 mod game;
 use game::system::system_report;
 use game::Game;
+use game::system::universe_json;
 
 thread_local! {
     static GAME: RefCell<Option<Game>> = RefCell::new(None);
@@ -45,4 +46,9 @@ pub fn greeting() -> String {
 #[wasm_bindgen]
 pub fn generate_system_report(seed: u64) -> String {
     system_report(seed)
+}
+
+#[wasm_bindgen]
+pub fn generate_universe(seed: u64) -> String {
+    universe_json(seed)
 }

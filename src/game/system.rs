@@ -1,9 +1,10 @@
 use crate::game::hazard::{
     apply_hazard, hazard_label, hazard_profile, Hazard, HazardKind, RiskChannels,
 };
-use crate::game::naming::generate_star_name;
-use rand::{Rng, SeedableRng};
+use crate::game::naming::{generate_nickname, generate_star_name};
+use rand::{seq::SliceRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use serde::Serialize;
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::ops::RangeInclusive;
@@ -86,17 +87,6 @@ pub struct Universe {
 }
 
 const BASE_PROBE_FAILURE: f64 = 0.05;
-const NICKNAMES: &[&str] = &[
-    "Dustbloom",
-    "Firefly",
-    "Blue Wake",
-    "Iron Garden",
-    "The Anvil",
-    "Glass Halo",
-    "Silent Drift",
-    "Vagrant",
-];
-
 pub struct UniverseGenerator {
     rng: ChaCha8Rng,
     used_names: HashSet<String>,
@@ -131,12 +121,20 @@ impl UniverseGenerator {
     }
 
     fn connect_graph(&mut self, systems: &mut [StarSystem]) {
-        // Ensure basic connectivity with a simple chain.
-        for i in 0..systems.len().saturating_sub(1) {
-            let a = i as u32;
-            let b = (i + 1) as u32;
-            systems[i].links.push(b);
-            systems[i + 1].links.push(a);
+        let n = systems.len();
+        if n <= 1 {
+            return;
+        }
+
+        // Random spanning tree: shuffle node order and connect each new node to a random earlier node.
+        let mut order: Vec<u32> = (0..n as u32).collect();
+        order.shuffle(&mut self.rng);
+        for window in 1..order.len() {
+            let child = order[window];
+            let parent_idx = self.rng.gen_range(0..window);
+            let parent = order[parent_idx];
+            systems[parent as usize].links.push(child);
+            systems[child as usize].links.push(parent);
         }
 
         // Add extra random bidirectional edges.
@@ -157,21 +155,10 @@ impl UniverseGenerator {
         self.rng.gen_range(range)
     }
 
-    fn maybe_nickname(&mut self) -> Option<String> {
-        if self.used_nicknames.len() == NICKNAMES.len() {
-            return None;
-        }
+    fn maybe_nickname(&mut self, hazards: &[HazardKind]) -> Option<String> {
         let roll: f64 = self.rng.gen();
         if roll < self.config.system.nickname_chance {
-            // Try a few times to find an unused nickname; pool is small.
-            for _ in 0..8 {
-                let idx = self.rng.gen_range(0..NICKNAMES.len());
-                let candidate = NICKNAMES[idx].to_string();
-                if self.used_nicknames.insert(candidate.clone()) {
-                    return Some(candidate);
-                }
-            }
-            None
+            generate_nickname(&mut self.rng, &mut self.used_nicknames, hazards)
         } else {
             None
         }
@@ -179,7 +166,7 @@ impl UniverseGenerator {
 
     fn make_star(&mut self) -> Star {
         let name = generate_star_name(&mut self.rng, &mut self.used_names);
-        let nickname = self.maybe_nickname();
+        let nickname = self.maybe_nickname(&[]);
         let id = self.next_id;
         self.next_id += 1;
 
@@ -227,13 +214,14 @@ impl UniverseGenerator {
         let mut moons = Vec::with_capacity(moon_count);
         for i in 0..moon_count {
             let name = format!("{} {}", parent_name, Self::roman_numeral(i));
-            let nickname = self.maybe_nickname();
+            let hazards = self.hazards_for_body();
+            let nickname = self.maybe_nickname(&hazard_kinds(&hazards));
             moons.push(OrbitalBody {
                 id: self.alloc_id(),
                 name,
                 nickname,
                 distance: self.rng.gen_range(1..=20),
-                hazards: self.hazards_for_body(),
+                hazards,
                 kind: OrbitalKind::Moon,
                 moons: Vec::new(),
             });
@@ -249,7 +237,8 @@ impl UniverseGenerator {
 
     fn make_planetoid(&mut self, base_name: &str, suffix: char) -> OrbitalBody {
         let name = format!("{} {}", base_name, suffix);
-        let nickname = self.maybe_nickname();
+        let hazards = self.hazards_for_body();
+        let nickname = self.maybe_nickname(&hazard_kinds(&hazards));
         let moons = self.make_moons(&name);
 
         OrbitalBody {
@@ -257,7 +246,7 @@ impl UniverseGenerator {
             name,
             nickname,
             distance: self.rng.gen_range(40..=400),
-            hazards: self.hazards_for_body(),
+            hazards,
             kind: OrbitalKind::Planetoid,
             moons,
         }
@@ -265,14 +254,15 @@ impl UniverseGenerator {
 
     fn make_asteroid(&mut self, base_name: &str, idx: usize) -> OrbitalBody {
         let name = format!("{} Belt {}", base_name, Self::roman_numeral(idx));
-        let nickname = self.maybe_nickname();
+        let hazards = self.hazards_for_body();
+        let nickname = self.maybe_nickname(&hazard_kinds(&hazards));
 
         OrbitalBody {
             id: self.alloc_id(),
             name,
             nickname,
             distance: self.rng.gen_range(300..=900),
-            hazards: self.hazards_for_body(),
+            hazards,
             kind: OrbitalKind::AsteroidBelt,
             moons: Vec::new(),
         }
@@ -352,6 +342,13 @@ pub fn system_report(seed: u64) -> String {
     output
 }
 
+pub fn universe_json(seed: u64) -> String {
+    let mut gen = UniverseGenerator::new(seed);
+    let universe = gen.generate();
+    let view = UniverseView::from(&universe);
+    serde_json::to_string(&view).unwrap_or_else(|_| "{}".to_string())
+}
+
 fn write_body(buf: &mut String, body: &OrbitalBody, indent: usize) {
     let pad = " ".repeat(indent);
     let probe_fail = probe_failure(body.hazards.as_slice());
@@ -399,4 +396,101 @@ fn probe_failure(hazards: &[Hazard]) -> f64 {
         apply_hazard(h, &mut acc);
     }
     acc.failure_prob(BASE_PROBE_FAILURE)
+}
+
+fn hazard_kinds(hazards: &[Hazard]) -> Vec<HazardKind> {
+    hazards.iter().map(|h| h.kind).collect()
+}
+
+#[derive(Serialize)]
+struct HazardView {
+    kind: &'static str,
+    probe_fail: f64,
+    hull_damage: f64,
+    yield_penalty: f64,
+}
+
+#[derive(Serialize)]
+struct OrbitalView {
+    name: String,
+    nickname: Option<String>,
+    distance: u32,
+    kind: &'static str,
+    probe_failure: f64,
+    hazards: Vec<HazardView>,
+    moons: Vec<OrbitalView>,
+}
+
+#[derive(Serialize)]
+struct StarView {
+    name: String,
+    nickname: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SystemView {
+    id: u32,
+    stars: Vec<StarView>,
+    orbitals: Vec<OrbitalView>,
+    links: Vec<u32>,
+}
+
+#[derive(Serialize)]
+struct UniverseView {
+    systems: Vec<SystemView>,
+}
+
+impl From<&Hazard> for HazardView {
+    fn from(h: &Hazard) -> Self {
+        Self {
+            kind: hazard_label(h.kind),
+            probe_fail: h.profile.probe_fail,
+            hull_damage: h.profile.hull_damage,
+            yield_penalty: h.profile.yield_penalty,
+        }
+    }
+}
+
+impl From<&OrbitalBody> for OrbitalView {
+    fn from(body: &OrbitalBody) -> Self {
+        let moons = body.moons.iter().map(OrbitalView::from).collect();
+        let hazards: Vec<HazardView> = body.hazards.iter().map(HazardView::from).collect();
+        Self {
+            name: body.name.clone(),
+            nickname: body.nickname.clone(),
+            distance: body.distance,
+            kind: kind_label(&body.kind),
+            probe_failure: probe_failure(&body.hazards),
+            hazards,
+            moons,
+        }
+    }
+}
+
+impl From<&Star> for StarView {
+    fn from(star: &Star) -> Self {
+        Self {
+            name: star.name.clone(),
+            nickname: star.nickname.clone(),
+        }
+    }
+}
+
+impl From<&StarSystem> for SystemView {
+    fn from(system: &StarSystem) -> Self {
+        Self {
+            id: system.id,
+            stars: system.stars.iter().map(StarView::from).collect(),
+            orbitals: system.orbitals.iter().map(OrbitalView::from).collect(),
+            links: system.links.clone(),
+        }
+    }
+}
+
+impl From<&Universe> for UniverseView {
+    fn from(universe: &Universe) -> Self {
+        Self {
+            systems: universe.systems.iter().map(SystemView::from).collect(),
+        }
+    }
 }
