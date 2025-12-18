@@ -1,0 +1,48 @@
+use std::cell::RefCell;
+use wasm_bindgen::prelude::*;
+
+mod game;
+use game::system::system_report;
+use game::Game;
+
+thread_local! {
+    static GAME: RefCell<Option<Game>> = RefCell::new(None);
+}
+
+fn with_game_mut<R>(f: impl FnOnce(&mut Game) -> R) -> Result<R, &'static str> {
+    GAME.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        match opt.as_mut() {
+            Some(game) => Ok(f(game)),
+            None => Err("game not initialized"),
+        }
+    })
+}
+
+#[wasm_bindgen]
+pub fn init_game(seed: u64) {
+    GAME.with(|g| {
+        *g.borrow_mut() = Some(Game::new(seed));
+    });
+}
+
+#[wasm_bindgen]
+pub fn tick() -> String {
+    match with_game_mut(|game| game.tick().to_string()) {
+        Ok(v) => v,
+        Err(e) => e.to_string(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn greeting() -> String {
+    match with_game_mut(|game| game::greeting_for(game)) {
+        Ok(v) => v,
+        Err(e) => e.to_string(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn generate_system_report(seed: u64) -> String {
+    system_report(seed)
+}
