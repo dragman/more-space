@@ -3,6 +3,21 @@ import { createPlanetMaterial } from "./planet-shader";
 
 export const PLANET_SCALE = 0.25;
 
+export type OrbitLineOptions = {
+  color?: BABYLON.Color3;
+  alpha?: number;
+  segments?: number;
+};
+
+export type StarfieldOptions = {
+  count?: number;
+  radius?: number;
+  baseName?: string;
+  emissive?: BABYLON.Color3;
+  scaleRange?: [number, number];
+  tintVariance?: boolean;
+};
+
 export type OrbitalBody = {
   name: string;
   kind: string;
@@ -125,4 +140,58 @@ export function createPlanetMesh(
   }
 
   return { root, mesh: planet, ring };
+}
+
+export function createOrbitLine(radius: number, s: BABYLON.Scene, opts: OrbitLineOptions = {}) {
+  const points = [];
+  const segments = opts.segments ?? 90;
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    points.push(new BABYLON.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+  }
+  const line = BABYLON.MeshBuilder.CreateLines("orbit", { points }, s);
+  line.color = opts.color ?? new BABYLON.Color3(0.37, 0.82, 1);
+  line.alpha = opts.alpha ?? 0.12;
+  line.isPickable = false;
+  return line;
+}
+
+export function createStarfield(scene: BABYLON.Scene, opts: StarfieldOptions = {}) {
+  const count = opts.count ?? 5000;
+  const radius = opts.radius ?? 650;
+  const emissive = opts.emissive ?? new BABYLON.Color3(1, 1, 1);
+  const scaleRange = opts.scaleRange ?? [0.5, 1.3];
+  const baseName = opts.baseName ?? "star";
+
+  const starMaterial = new BABYLON.StandardMaterial(`${baseName}-mat`, scene);
+  starMaterial.emissiveColor = emissive;
+  starMaterial.disableLighting = true;
+  const base = BABYLON.MeshBuilder.CreateSphere(`${baseName}-base`, { diameter: 1 }, scene);
+  base.material = starMaterial;
+  base.isPickable = false;
+  base.setEnabled(false);
+
+  const [minScale, maxScale] = scaleRange;
+  for (let i = 0; i < count; i++) {
+    const inst = base.createInstance(`${baseName}-${i}`);
+    const dir = randomUnitVector();
+    inst.position = dir.scale(radius * (0.6 + Math.random() * 0.4));
+    inst.scaling.scaleInPlace(minScale + Math.random() * (maxScale - minScale));
+    if (opts.tintVariance) {
+      const sparkle = 0.65 + Math.random() * 0.9;
+      const tint = 0.95 + Math.random() * 0.1;
+      const instanced = inst as BABYLON.InstancedMesh & { color?: BABYLON.Color4 };
+      instanced.color = new BABYLON.Color4(sparkle, tint, 1, 1);
+    }
+    inst.isPickable = false;
+  }
+}
+
+export function randomUnitVector() {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const x = Math.sin(phi) * Math.cos(theta);
+  const y = Math.sin(phi) * Math.sin(theta);
+  const z = Math.cos(phi);
+  return new BABYLON.Vector3(x, y, z);
 }

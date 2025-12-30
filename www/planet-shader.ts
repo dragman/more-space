@@ -134,6 +134,6 @@ export function createPlanetMaterial(
   mat.setVector3("u_lightDir", new BABYLON.Vector3(0.4, 0.8, 0.3));
   mat.setFloat("u_rimStrength", 0.1);
   mat.backFaceCulling = true;
-  mat.disableLighting = true;
+  // mat.disableLighting = true;
   return mat;
 }

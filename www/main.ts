@@ -1,8 +1,8 @@
 import initWasm, { generate_universe } from "../pkg/more_space.js";
 import * as BABYLON from "babylonjs";
-import { bodyStyle, createPlanetMesh, hashString, hexToColor3 } from "./planet-helpers";
+import { bodyStyle, createOrbitLine, createPlanetMesh, createStarfield, hashString, hexToColor3 } from "./planet-helpers";
 
-const canvas = document.getElementById("graph") as HTMLCanvasElement;
+const canvas = document.getElementById("graph") as unknown as HTMLCanvasElement;
 const tooltip = document.getElementById("tooltip") as HTMLDivElement;
 const seedInput = document.getElementById("seedInput") as HTMLInputElement;
 const regenBtn = document.getElementById("regen") as HTMLButtonElement;
@@ -159,34 +159,6 @@ function createBaseScene() {
   return s;
 }
 
-function createStarfield(s) {
-  const starMaterial = new BABYLON.StandardMaterial("starMat", s);
-  starMaterial.emissiveColor = new BABYLON.Color3(1, 1, 1);
-  starMaterial.disableLighting = true;
-  const base = BABYLON.MeshBuilder.CreateSphere("star-base", { diameter: 1 }, s);
-  base.material = starMaterial;
-  base.isPickable = false;
-  base.setEnabled(false);
-
-  const radius = 650;
-  for (let i = 0; i < 5000 ; i++) {
-    const inst = base.createInstance(`star-${i}`);
-    const dir = randomUnitVector();
-    inst.position = dir.scale(radius * (0.6 + Math.random() * 0.4));
-    inst.scaling.scaleInPlace(0.5 + Math.random() * 0.8);
-    inst.isPickable = false;
-  }
-}
-
-function randomUnitVector() {
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.acos(2 * Math.random() - 1);
-  const x = Math.sin(phi) * Math.cos(theta);
-  const y = Math.sin(phi) * Math.sin(theta);
-  const z = Math.cos(phi);
-  return new BABYLON.Vector3(x, y, z);
-}
-
 function createLabel(text, s) {
   const texture = new BABYLON.DynamicTexture(
     `label-${text}`,
@@ -234,20 +206,6 @@ function createStarMesh(sys, s) {
   glowLayer.addIncludedOnlyMesh(core);
   glowLayer.intensity = 0.5;
   return { mesh: core, colors };
-}
-
-function createOrbitLine(radius, s) {
-  const points = [];
-  const segments = 90;
-  for (let i = 0; i <= segments; i++) {
-    const angle = (i / segments) * Math.PI * 2;
-    points.push(new BABYLON.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
-  }
-  const line = BABYLON.MeshBuilder.CreateLines("orbit", { points }, s);
-  line.color = new BABYLON.Color3(0.37, 0.82, 1);
-  line.alpha = 0.12;
-  line.isPickable = false;
-  return line;
 }
 
 function buildScene(universe) {
@@ -349,7 +307,7 @@ function buildScene(universe) {
       const mat = b.mesh.material;
       if (mat?.getClassName && mat.getClassName() === "ShaderMaterial") {
         b.shaderTime += dt * 0.001;
-        mat.setFloat("u_time", b.shaderTime);
+        // mat.setFloat("u_time", b.shaderTime);
       }
     });
   });
@@ -369,8 +327,7 @@ function setupPointerHandling(s) {
       }
     }
     if (
-      pointerInfo.type === BABYLON.PointerEventTypes.POINTERUP ||
-      pointerInfo.type === BABYLON.PointerEventTypes.POINTEROUT
+      pointerInfo.type === BABYLON.PointerEventTypes.POINTERUP
     ) {
       hideTooltip();
     }
