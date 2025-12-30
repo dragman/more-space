@@ -1,23 +1,23 @@
 import * as BABYLON from "babylonjs";
-import { bodyStyle, createPlanetMesh, hashString } from "./planet-helpers.js";
+import { bodyStyle, createPlanetMesh, hashString, OrbitalBody } from "./planet-helpers";
 
-const canvas = document.getElementById("planetCanvas");
-const scaleInput = document.getElementById("scale");
-const scaleValue = document.getElementById("scaleValue");
-const regenBtn = document.getElementById("regen");
+const canvas = document.getElementById("planetCanvas") as HTMLCanvasElement;
+const scaleInput = document.getElementById("scale") as HTMLInputElement;
+const scaleValue = document.getElementById("scaleValue") as HTMLSpanElement;
+const regenBtn = document.getElementById("regen") as HTMLButtonElement;
 
-const basePlanetConfigs = [
+const basePlanetConfigs: OrbitalBody[] = [
   { name: "Planetoid Prime", kind: "Planetoid", distance: 600 },
   { name: "Asteroid Belt", kind: "AsteroidBelt", distance: 300 },
   { name: "Moonlet", kind: "Moon", distance: 200 },
 ];
 
-let engine = null;
-let scene = null;
-let camera = null;
-let planetRoot = null;
-let planetConfigs = [];
-let planets = [];
+let engine: BABYLON.Engine | null = null;
+let scene: BABYLON.Scene | null = null;
+let camera: BABYLON.ArcRotateCamera | null = null;
+let planetRoot: BABYLON.TransformNode | null = null;
+let planetConfigs: OrbitalBody[] = [];
+let planets: { root: BABYLON.TransformNode; mesh: BABYLON.AbstractMesh; ring?: BABYLON.AbstractMesh | null; shaderTime: number }[] = [];
 
 function randomizeConfigs() {
   return basePlanetConfigs.map((cfg) => ({

@@ -1,9 +1,31 @@
 import * as BABYLON from "babylonjs";
-import { createPlanetMaterial } from "./planet-shader.js";
+import { createPlanetMaterial } from "./planet-shader";
 
 export const PLANET_SCALE = 0.25;
 
-export function hashString(name) {
+export type OrbitalBody = {
+  name: string;
+  kind: string;
+  hazards?: { kind: string }[];
+  distance?: number;
+};
+
+export type BodyStyle = {
+  kindId: number;
+  baseColor: number;
+  highlightColor: number;
+  radius: number;
+  ring: { color: number } | null;
+  outline: number;
+};
+
+export type PlanetMesh = {
+  root: BABYLON.TransformNode;
+  mesh: BABYLON.Mesh;
+  ring: BABYLON.Mesh | null;
+};
+
+export function hashString(name: string) {
   let h = 0;
   for (let i = 0; i < name.length; i++) {
     h = (h * 131 + name.charCodeAt(i)) >>> 0;
@@ -11,7 +33,7 @@ export function hashString(name) {
   return h;
 }
 
-export function hexToColor3(hex) {
+export function hexToColor3(hex: number) {
   return new BABYLON.Color3(
     ((hex >> 16) & 0xff) / 255,
     ((hex >> 8) & 0xff) / 255,
@@ -19,7 +41,7 @@ export function hexToColor3(hex) {
   );
 }
 
-export function bodyStyle(orb, distance) {
+export function bodyStyle(orb: OrbitalBody, distance: number): BodyStyle {
   const hasHazard = orb.hazards && orb.hazards.length > 0;
   const h = hashString(orb.name);
   const palette = [
@@ -62,7 +84,11 @@ export function bodyStyle(orb, distance) {
   }
 }
 
-export function createPlanetMesh(orb, style, s) {
+export function createPlanetMesh(
+  orb: OrbitalBody,
+  style: BodyStyle,
+  s: BABYLON.Scene
+): PlanetMesh {
   const root = new BABYLON.TransformNode(`planet-root-${orb.name}`, s);
 
   const planet = BABYLON.MeshBuilder.CreateSphere(
@@ -75,7 +101,7 @@ export function createPlanetMesh(orb, style, s) {
   planet.isPickable = true;
   planet.parent = root;
 
-  let ring = null;
+  let ring: BABYLON.Mesh | null = null;
   if (style.ring) {
     ring = BABYLON.MeshBuilder.CreateTorus(
       `ring-${orb.name}`,

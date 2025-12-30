@@ -1,6 +1,12 @@
 import * as BABYLON from "babylonjs";
 
-function registerPlanetShaders() {
+type PlanetMaterialStyle = {
+  baseColor: number;
+  highlightColor: number;
+  kindId: number;
+};
+
+function registerPlanetShaders(): void {
   if (BABYLON.Effect.ShadersStore.planetVertexShader) return;
 
   BABYLON.Effect.ShadersStore.planetVertexShader = `
@@ -92,7 +98,11 @@ void main(void) {
 `;
 }
 
-export function createPlanetMaterial(scene, style, seed) {
+export function createPlanetMaterial(
+  scene: BABYLON.Scene,
+  style: PlanetMaterialStyle,
+  seed: number
+): BABYLON.ShaderMaterial {
   registerPlanetShaders();
 
   const mat = new BABYLON.ShaderMaterial(

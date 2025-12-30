@@ -1,12 +1,12 @@
-import init, { generate_universe } from "../pkg/more_space.js";
+import initWasm, { generate_universe } from "../pkg/more_space.js";
 import * as BABYLON from "babylonjs";
-import { bodyStyle, createPlanetMesh, hashString, hexToColor3 } from "./planet-helpers.js";
+import { bodyStyle, createPlanetMesh, hashString, hexToColor3 } from "./planet-helpers";
 
-const canvas = document.getElementById("graph");
-const tooltip = document.getElementById("tooltip");
-const seedInput = document.getElementById("seedInput");
-const regenBtn = document.getElementById("regen");
-const randomBtn = document.getElementById("randomSeed");
+const canvas = document.getElementById("graph") as HTMLCanvasElement;
+const tooltip = document.getElementById("tooltip") as HTMLDivElement;
+const seedInput = document.getElementById("seedInput") as HTMLInputElement;
+const regenBtn = document.getElementById("regen") as HTMLButtonElement;
+const randomBtn = document.getElementById("randomSeed") as HTMLButtonElement;
 
 const VIEW_HEIGHT = 1400;
 const PIXEL_TO_WORLD = 0.14;
@@ -15,13 +15,21 @@ const ORBIT_BASE = 22;
 const MIN_CAMERA_RADIUS = 45;
 const MAX_CAMERA_RADIUS = 320;
 
-let engine = null;
-let scene = null;
-let camera = null;
-let glowLayer = null;
-let universeData = null;
-let layout = null;
-let bodyAnims = [];
+let engine: BABYLON.Engine | null = null;
+let scene: BABYLON.Scene | null = null;
+let camera: BABYLON.ArcRotateCamera | null = null;
+let glowLayer: BABYLON.GlowLayer | null = null;
+let universeData: any = null;
+let layout: any = null;
+let bodyAnims: {
+  root: BABYLON.TransformNode;
+  mesh: BABYLON.AbstractMesh;
+  ring?: BABYLON.AbstractMesh | null;
+  radius: number;
+  angle: number;
+  speed: number;
+  shaderTime: number;
+}[] = [];
 
 function randomSeed() {
   const upper = BigInt(Number.MAX_SAFE_INTEGER);
@@ -187,7 +195,7 @@ function createLabel(text, s) {
     false
   );
   texture.hasAlpha = true;
-  texture.drawText(text, null, 86, "700 64px 'Space Grotesk', sans-serif", "#e8ecff", "transparent");
+  texture.drawText(text, 10, 86, "700 64px 'Space Grotesk', sans-serif", "#e8ecff", "transparent", true, true);
   const mat = new BABYLON.StandardMaterial(`labelMat-${text}`, s);
   mat.diffuseTexture = texture;
   mat.emissiveColor = new BABYLON.Color3(0.91, 0.93, 1.0);
@@ -441,7 +449,7 @@ function moveTooltip(evt) {
 }
 
 async function run() {
-  await init();
+  await initWasm();
   setupEngine();
   const seed = randomSeed();
   seedInput.value = seed.toString();
