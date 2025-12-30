@@ -186,26 +186,35 @@ function createLabel(text, s) {
 }
 
 function createStarMesh(sys, s) {
-  const starPalette = [
-    { glow: 0x9bd4ff, core: 0xbfe2ff },
-    { glow: 0xffd79b, core: 0xfff0b5 },
-    { glow: 0xff9b9b, core: 0xffc4c4 },
-    { glow: 0xb3a5ff, core: 0xd7ceff },
+  const starTypes = [
+    { name: "Blue Giant", core: 0xaed7ff, glow: 0x7fc7ff, size: 1.35, brightness: 0.6 },
+    { name: "White Main", core: 0xf7f8ff, glow: 0xdde9ff, size: 1.0, brightness: 0.45 },
+    { name: "Yellow Dwarf", core: 0xfff2c2, glow: 0xffd79b, size: 0.9, brightness: 0.4 },
+    { name: "Orange K", core: 0xffd1a3, glow: 0xffb477, size: 0.8, brightness: 0.35 },
+    { name: "Red M", core: 0xffb0aa, glow: 0xff8f88, size: 0.65, brightness: 0.3 },
   ];
-  const name = sys?.stars?.[0]?.name || sys?.name || "";
-  const idx = name ? hashString(name) % starPalette.length : 0;
-  const colors = starPalette[idx];
-  const core = BABYLON.MeshBuilder.CreateSphere("star-core", { diameter: NODE_RADIUS * PIXEL_TO_WORLD }, s);
+
+  const seedName = sys?.stars?.[0]?.name || sys?.name || "";
+  const idx = seedName ? hashString(seedName) % starTypes.length : 0;
+  const type = starTypes[idx];
+
+  const diameter = NODE_RADIUS * PIXEL_TO_WORLD * type.size * 3.2;
+  const radius = diameter * 0.5;
+  const core = BABYLON.MeshBuilder.CreateSphere(
+    "star-core",
+    { diameter },
+    s
+  );
   const mat = new BABYLON.StandardMaterial("starMat-core", s);
-  mat.emissiveColor = hexToColor3(colors.core);
-  mat.diffuseColor = hexToColor3(colors.core);
-  mat.specularColor = hexToColor3(colors.glow);
-  mat.alpha = 0.95;
+  mat.emissiveColor = hexToColor3(type.core);
+  mat.diffuseColor = hexToColor3(type.core);
+  mat.specularColor = hexToColor3(type.glow);
+  mat.alpha = 0.98;
   core.material = mat;
   core.isPickable = true;
   glowLayer.addIncludedOnlyMesh(core);
-  glowLayer.intensity = 0.5;
-  return { mesh: core, colors };
+  glowLayer.intensity = type.brightness;
+  return { mesh: core, colors: { core: type.core, glow: type.glow }, radius };
 }
 
 function buildScene(universe) {
@@ -240,12 +249,14 @@ function buildScene(universe) {
     line.isPickable = false;
   });
 
+  const MIN_ORBIT_BUFFER = 3 * PIXEL_TO_WORLD;
+
   layout.systems.forEach((s) => {
     const systemRoot = new BABYLON.TransformNode(`system-${s.id}`, scene);
     systemRoot.position = new BABYLON.Vector3(s.x, 0, s.y);
     systemRoot.rotation = new BABYLON.Vector3(s.tilt.x * 0.3, 0, s.tilt.z * 0.3);
 
-    const { mesh: star, colors: starColors } = createStarMesh(s.sys, scene);
+    const { mesh: star, colors: starColors, radius: starRadius } = createStarMesh(s.sys, scene);
     star.parent = systemRoot;
     star.metadata = {
       type: "system",
@@ -266,13 +277,20 @@ function buildScene(universe) {
     const label = createLabel(s.label.slice(0, 18), scene);
     label.parent = systemRoot;
 
-    s.orbitals.forEach((o) => {
-      const radius = ORBIT_BASE * PIXEL_TO_WORLD + o.baseDistance * layout.orbitScale;
+    // Keep inner orbits closer and enforce buffers so planets/rings never intersect
+    const orbitals = [...s.orbitals].sort((a, b) => a.baseDistance - b.baseDistance);
+    let lastEdge = starRadius + MIN_ORBIT_BUFFER;
+
+    orbitals.forEach((o) => {
+      const style = bodyStyle(o.orb, o.baseDistance);
+      const baseRadius = ORBIT_BASE * PIXEL_TO_WORLD + o.baseDistance * layout.orbitScale;
+      const planetExtent = style.ring ? style.radius * 2 : style.radius;
+      const radius = Math.max(baseRadius, lastEdge + planetExtent + MIN_ORBIT_BUFFER);
+      lastEdge = radius + planetExtent + MIN_ORBIT_BUFFER;
       o.radius = radius;
       const orbit = createOrbitLine(radius, scene);
       orbit.parent = systemRoot;
 
-      const style = bodyStyle(o.orb, o.baseDistance);
       const { root, mesh: planetMesh, ring } = createPlanetMesh(o.orb, style, scene);
       root.parent = systemRoot;
       root.position = new BABYLON.Vector3(
