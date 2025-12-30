@@ -27,7 +27,7 @@ let planets: {
     shaderTime: number;
 }[] = [];
 
-function randomizeConfigs() {
+function randomizeConfigs(): OrbitalBody[] {
     return basePlanetConfigs.map((cfg) => ({
         ...cfg,
         // tweak the name so palette/ring selection gets a new seed
@@ -35,7 +35,7 @@ function randomizeConfigs() {
     }));
 }
 
-function setupEngine() {
+function setupEngine(): void {
     if (engine) return;
     engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     engine.runRenderLoop(() => {
@@ -47,7 +47,7 @@ function setupEngine() {
     resizeCanvas();
 }
 
-function resizeCanvas() {
+function resizeCanvas(): void {
     if (!engine) return;
     const ratio = window.devicePixelRatio || 1;
     const width = canvas.clientWidth * ratio;
@@ -59,7 +59,7 @@ function resizeCanvas() {
     engine.resize();
 }
 
-function createScene() {
+function createScene(): void {
     if (scene) {
         scene.dispose();
     }
@@ -104,7 +104,7 @@ function createScene() {
     });
 }
 
-function clearPlanets() {
+function clearPlanets(): void {
     planets.forEach((p) => {
         p.mesh.material?.dispose();
         p.mesh.dispose();
@@ -116,7 +116,7 @@ function clearPlanets() {
     planets = [];
 }
 
-function buildPlanets() {
+function buildPlanets(): void {
     clearPlanets();
     if (!scene || !planetRoot) return;
 
@@ -143,7 +143,7 @@ function buildPlanets() {
     applyScale(parseFloat(scaleInput.value));
 }
 
-function applyScale(scale) {
+function applyScale(scale: number): void {
     if (planetRoot) {
         planetRoot.scaling = new BABYLON.Vector3(scale, scale, scale);
     }
@@ -159,7 +159,7 @@ regenBtn.addEventListener("click", () => {
     buildPlanets();
 });
 
-function createCenterStar(s: BABYLON.Scene) {
+function createCenterStar(s: BABYLON.Scene): BABYLON.Mesh {
     const star = BABYLON.MeshBuilder.CreateSphere("center-star", { diameter: 6 }, s);
     const mat = new BABYLON.StandardMaterial("center-star-mat", s);
     mat.emissiveColor = new BABYLON.Color3(1.2, 1, 0.78);
@@ -176,7 +176,7 @@ function createCenterStar(s: BABYLON.Scene) {
     return star;
 }
 
-function init() {
+function init(): void {
     setupEngine();
     planetConfigs = randomizeConfigs();
     createScene();

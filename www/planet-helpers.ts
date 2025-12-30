@@ -40,7 +40,7 @@ export type PlanetMesh = {
   ring: BABYLON.Mesh | null;
 };
 
-export function hashString(name: string) {
+export function hashString(name: string): number {
   let h = 0;
   for (let i = 0; i < name.length; i++) {
     h = (h * 131 + name.charCodeAt(i)) >>> 0;
@@ -48,7 +48,7 @@ export function hashString(name: string) {
   return h;
 }
 
-export function hexToColor3(hex: number) {
+export function hexToColor3(hex: number): BABYLON.Color3 {
   return new BABYLON.Color3(
     ((hex >> 16) & 0xff) / 255,
     ((hex >> 8) & 0xff) / 255,
@@ -142,7 +142,11 @@ export function createPlanetMesh(
   return { root, mesh: planet, ring };
 }
 
-export function createOrbitLine(radius: number, s: BABYLON.Scene, opts: OrbitLineOptions = {}) {
+export function createOrbitLine(
+  radius: number,
+  s: BABYLON.Scene,
+  opts: OrbitLineOptions = {}
+): BABYLON.LinesMesh {
   const points = [];
   const segments = opts.segments ?? 90;
   for (let i = 0; i <= segments; i++) {
@@ -156,7 +160,7 @@ export function createOrbitLine(radius: number, s: BABYLON.Scene, opts: OrbitLin
   return line;
 }
 
-export function createStarfield(scene: BABYLON.Scene, opts: StarfieldOptions = {}) {
+export function createStarfield(scene: BABYLON.Scene, opts: StarfieldOptions = {}): void {
   const count = opts.count ?? 5000;
   const radius = opts.radius ?? 650;
   const emissive = opts.emissive ?? new BABYLON.Color3(1, 1, 1);
@@ -187,7 +191,7 @@ export function createStarfield(scene: BABYLON.Scene, opts: StarfieldOptions = {
   }
 }
 
-export function randomUnitVector() {
+export function randomUnitVector(): BABYLON.Vector3 {
   const theta = Math.random() * Math.PI * 2;
   const phi = Math.acos(2 * Math.random() - 1);
   const x = Math.sin(phi) * Math.cos(theta);

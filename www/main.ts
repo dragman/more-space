@@ -31,13 +31,13 @@ let bodyAnims: {
   shaderTime: number;
 }[] = [];
 
-function randomSeed() {
+function randomSeed(): bigint {
   const upper = BigInt(Number.MAX_SAFE_INTEGER);
   const low = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
   return (BigInt(Date.now()) ^ low) % upper;
 }
 
-function parseSeed() {
+function parseSeed(): bigint {
   const text = seedInput.value.trim();
   if (!text) return randomSeed();
   try {
@@ -47,7 +47,7 @@ function parseSeed() {
   }
 }
 
-function angleForBody(name) {
+function angleForBody(name: string): number {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
@@ -55,19 +55,19 @@ function angleForBody(name) {
   return (hash % 360) * (Math.PI / 180);
 }
 
-function hazardSummary(hazards) {
+function hazardSummary(hazards: { kind: string }[]): string {
   if (!hazards.length) return "hazards: none";
   const labels = hazards.map((h) => h.kind).join(", ");
   return `hazards: ${labels}`;
 }
 
-function systemLabel(sys) {
+function systemLabel(sys: any): string {
   if (!sys) return "";
   const first = sys.stars && sys.stars[0];
   return first ? first.name : `System ${sys.id}`;
 }
 
-function prepareLayout(universe) {
+function prepareLayout(universe: any): void {
   const width = canvas.clientWidth || 1200;
   const height = VIEW_HEIGHT;
   const viewRadius = Math.min(width, height) / 2;
@@ -117,7 +117,7 @@ function prepareLayout(universe) {
   layout = { systems, edges, orbitScale, maxDistance };
 }
 
-function setupEngine() {
+function setupEngine(): void {
   if (engine) return;
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
   engine.runRenderLoop(() => {
@@ -128,7 +128,7 @@ function setupEngine() {
   window.addEventListener("resize", () => engine.resize());
 }
 
-function createBaseScene() {
+function createBaseScene(): BABYLON.Scene {
   const s = new BABYLON.Scene(engine);
   s.clearColor = new BABYLON.Color4(0.02, 0.04, 0.07, 1);
 
@@ -159,7 +159,7 @@ function createBaseScene() {
   return s;
 }
 
-function createLabel(text, s) {
+function createLabel(text: string, s: BABYLON.Scene): BABYLON.Mesh {
   const texture = new BABYLON.DynamicTexture(
     `label-${text}`,
     { width: 512, height: 128 },
@@ -185,7 +185,10 @@ function createLabel(text, s) {
   return plane;
 }
 
-function createStarMesh(sys, s) {
+function createStarMesh(
+  sys: any,
+  s: BABYLON.Scene
+): { mesh: BABYLON.Mesh; colors: { core: number; glow: number }; radius: number } {
   const starTypes = [
     { name: "Blue Giant", core: 0xaed7ff, glow: 0x7fc7ff, size: 1.35, brightness: 0.6 },
     { name: "White Main", core: 0xf7f8ff, glow: 0xdde9ff, size: 1.0, brightness: 0.45 },
@@ -217,7 +220,7 @@ function createStarMesh(sys, s) {
   return { mesh: core, colors: { core: type.core, glow: type.glow }, radius };
 }
 
-function buildScene(universe) {
+function buildScene(universe: any): void {
   // setupEngine();
   prepareLayout(universe);
 
@@ -331,9 +334,9 @@ function buildScene(universe) {
   });
 }
 
-function setupPointerHandling(s) {
+function setupPointerHandling(s: BABYLON.Scene): void {
   s.skipPointerMovePicking = false;
-  s.onPointerObservable.add((pointerInfo) => {
+  s.onPointerObservable.add((pointerInfo: BABYLON.PointerInfo) => {
     if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERMOVE) {
       // Manual pick keeps hover working even when Babylon skips pickInfo on some pointer events.
       const pick = s.pick(s.pointerX, s.pointerY);
@@ -354,7 +357,7 @@ function setupPointerHandling(s) {
   canvas.addEventListener("mouseleave", hideTooltip);
 }
 
-async function renderUniverse(seed) {
+async function renderUniverse(seed: bigint): Promise<void> {
   try {
     const json = generate_universe(seed);
     universeData = JSON.parse(json);
@@ -364,7 +367,7 @@ async function renderUniverse(seed) {
   }
 }
 
-function showSystemInfo(sys, evt) {
+function showSystemInfo(sys: any, evt: MouseEvent): void {
   if (!sys) return;
   const stars = sys.stars
     .map((s) => `${s.name}${s.nickname ? ` (${s.nickname})` : ""}`)
@@ -381,7 +384,7 @@ function showSystemInfo(sys, evt) {
   );
 }
 
-function showOrbitInfo(sys, orb, evt) {
+function showOrbitInfo(sys: any, orb: any, evt: MouseEvent): void {
   const hazards = orb.hazards.length
     ? orb.hazards.map((h) => h.kind).join(", ")
     : "none";
@@ -399,17 +402,17 @@ function showOrbitInfo(sys, orb, evt) {
   );
 }
 
-function showTooltip(content, evt) {
+function showTooltip(content: string, evt: MouseEvent): void {
   tooltip.innerHTML = content;
   tooltip.style.display = "block";
   moveTooltip(evt);
 }
 
-function hideTooltip() {
+function hideTooltip(): void {
   tooltip.style.display = "none";
 }
 
-function moveTooltip(evt) {
+function moveTooltip(evt: MouseEvent): void {
   if (!evt) return;
   const padding = 6;
   const rect = tooltip.getBoundingClientRect();
@@ -423,7 +426,7 @@ function moveTooltip(evt) {
   tooltip.style.top = `${y}px`;
 }
 
-async function run() {
+async function run(): Promise<void> {
   await initWasm();
   setupEngine();
   const seed = randomSeed();
