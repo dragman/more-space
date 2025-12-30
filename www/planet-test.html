@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Planet Shader Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #0b1021;
+        --panel: #131a33;
+        --text: #e8ecff;
+        --muted: #8ea2c6;
+        --accent: #5ed0ff;
+        --accent-2: #d77bff;
+        --shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        padding: 20px;
+      }
+      h1 {
+        margin: 0 0 4px;
+      }
+      p {
+        margin: 0 0 10px;
+        color: var(--muted);
+      }
+      .panel {
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      label {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      input[type="range"] {
+        width: 220px;
+      }
+      button {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        border: none;
+        color: #0a0d1c;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+      }
+      canvas {
+        width: 100%;
+        height: 420px;
+        display: block;
+        border-radius: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>Planet Shader Test</h1>
+      <p>Use this page to inspect planet shaders and how they behave as you scale them.</p>
+      <div class="controls">
+        <label for="scale">Scale: <span id="scaleValue">1.0x</span></label>
+        <input id="scale" type="range" min="0.2" max="5" step="0.1" value="1" />
+        <button id="regen">Randomize seeds</button>
+      </div>
+      <canvas id="planetCanvas"></canvas>
+    </div>
+
+    <script type="module" src="./planet-test.js"></script>
+  </body>
+</html>

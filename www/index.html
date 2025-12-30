@@ -26,8 +26,7 @@
           var(--bg);
         color: var(--text);
         min-height: 100vh;
-        overflow-y: auto;
-        padding: 20px;
+        overflow: hidden;
       }
       h1 {
         margin: 0 0 8px;
@@ -40,18 +39,20 @@
       #app {
         display: flex;
         flex-direction: column;
-        gap: 16px;
-        max-width: 1400px;
-        margin: 0 auto;
+        gap: 12px;
+        height: 100vh;
+        width: 100vw;
+        padding: 12px 14px;
       }
       header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         background: var(--panel);
-        padding: 16px 18px;
+        padding: 14px 16px;
         border-radius: 12px;
         box-shadow: var(--shadow);
+        flex: 0 0 auto;
       }
       .controls {
         display: flex;
@@ -85,7 +86,7 @@
       .panel {
         background: linear-gradient(145deg, rgba(5, 7, 15, 0.85), rgba(10, 14, 28, 0.95));
         border-radius: 14px;
-        padding: 14px;
+        padding: 12px;
         box-shadow: var(--shadow);
         min-height: 200px;
       }
@@ -96,12 +97,15 @@
           radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.05), transparent 45%),
           #05070f;
         border: 1px solid rgba(255, 255, 255, 0.06);
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
       }
       #graph {
         display: block;
         width: 100%;
-        height: 1400px;
-        min-height: 1400px;
+        height: 100%;
+        min-height: 0;
         border-radius: 12px;
       }
       .muted {
