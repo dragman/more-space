@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
 mod game;
+mod hex;
 use game::system::universe_json;
 use game::Game;
 
@@ -45,4 +46,9 @@ pub fn greeting() -> String {
 #[wasm_bindgen]
 pub fn generate_universe(seed: u64) -> String {
     universe_json(seed)
+}
+
+#[wasm_bindgen]
+pub fn hex_grid(radius: u32) -> String {
+    hex::grid_json(radius)
 }
