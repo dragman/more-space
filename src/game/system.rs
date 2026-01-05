@@ -6,7 +6,6 @@ use rand::{seq::SliceRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::Serialize;
 use std::collections::HashSet;
-use std::fmt::Write;
 use std::ops::RangeInclusive;
 
 #[derive(Clone, Debug)]
@@ -300,86 +299,11 @@ impl UniverseGenerator {
     }
 }
 
-pub fn system_report(seed: u64) -> String {
-    let mut gen = UniverseGenerator::new(seed);
-    let universe = gen.generate();
-
-    let mut output = String::new();
-    let _ = writeln!(
-        output,
-        "Universe with {} systems (seed {})",
-        universe.systems.len(),
-        seed
-    );
-
-    for system in universe.systems {
-        let links = if system.links.is_empty() {
-            "none".to_string()
-        } else {
-            system
-                .links
-                .iter()
-                .map(|l| l.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let _ = writeln!(output, "System {} links -> {}", system.id, links);
-
-        for star in &system.stars {
-            let nick = star
-                .nickname
-                .as_ref()
-                .map(|n| format!(" ({})", n))
-                .unwrap_or_default();
-            let _ = writeln!(output, "  Star: {}{}", star.name, nick);
-        }
-
-        for body in &system.orbitals {
-            write_body(&mut output, body, 2);
-        }
-    }
-
-    output
-}
-
 pub fn universe_json(seed: u64) -> String {
     let mut gen = UniverseGenerator::new(seed);
     let universe = gen.generate();
     let view = UniverseView::from(&universe);
     serde_json::to_string(&view).unwrap_or_else(|_| "{}".to_string())
-}
-
-fn write_body(buf: &mut String, body: &OrbitalBody, indent: usize) {
-    let pad = " ".repeat(indent);
-    let probe_fail = probe_failure(body.hazards.as_slice());
-    let hazard_list = if body.hazards.is_empty() {
-        "none".to_string()
-    } else {
-        body.hazards
-            .iter()
-            .map(|h| hazard_label(h.kind))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let nick = body
-        .nickname
-        .as_ref()
-        .map(|n| format!(" ({})", n))
-        .unwrap_or_default();
-    let _ = writeln!(
-        buf,
-        "{}- {} [{}] dist={} hazards={} probe_fail={:.2}%{}",
-        pad,
-        body.name,
-        kind_label(&body.kind),
-        body.distance,
-        hazard_list,
-        probe_fail * 100.0,
-        nick
-    );
-    for moon in &body.moons {
-        write_body(buf, moon, indent + 4);
-    }
 }
 
 fn kind_label(kind: &OrbitalKind) -> &'static str {
