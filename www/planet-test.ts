@@ -1,5 +1,28 @@
-import * as BABYLON from "babylonjs";
-import { bodyStyle, createOrbitLine, createPlanetMesh, createStarfield, hashString, OrbitalBody } from "./planet-helpers";
+import {
+    AbstractMesh,
+    ArcRotateCamera,
+    Color3,
+    Color4,
+    Engine,
+    GlowLayer,
+    HemisphericLight,
+    LinesMesh,
+    Mesh,
+    MeshBuilder,
+    PointLight,
+    Scene,
+    StandardMaterial,
+    TransformNode,
+    Vector3,
+} from "@babylonjs/core";
+import {
+    bodyStyle,
+    createOrbitLine,
+    createPlanetMesh,
+    createStarfield,
+    hashString,
+    OrbitalBody,
+} from "./planet-helpers";
 
 const canvas = document.getElementById("planetCanvas") as unknown as HTMLCanvasElement;
 const scaleInput = document.getElementById("scale") as HTMLInputElement;
@@ -12,18 +35,18 @@ const basePlanetConfigs: OrbitalBody[] = [
     { name: "Moonlet", kind: "Moon", distance: 200 },
 ];
 
-let engine: BABYLON.Engine | null = null;
-let scene: BABYLON.Scene | null = null;
-let camera: BABYLON.ArcRotateCamera | null = null;
-let glowLayer: BABYLON.GlowLayer | null = null;
-let planetRoot: BABYLON.TransformNode | null = null;
-let orbitLines: BABYLON.LinesMesh[] = [];
-let starMesh: BABYLON.Mesh | null = null;
+let engine: Engine | null = null;
+let scene: Scene | null = null;
+let camera: ArcRotateCamera | null = null;
+let glowLayer: GlowLayer | null = null;
+let planetRoot: TransformNode | null = null;
+let orbitLines: LinesMesh[] = [];
+let starMesh: Mesh | null = null;
 let planetConfigs: OrbitalBody[] = [];
 let planets: {
-    root: BABYLON.TransformNode;
-    mesh: BABYLON.AbstractMesh;
-    ring?: BABYLON.AbstractMesh | null;
+    root: TransformNode;
+    mesh: AbstractMesh;
+    ring?: AbstractMesh | null;
     shaderTime: number;
 }[] = [];
 
@@ -37,7 +60,7 @@ function randomizeConfigs(): OrbitalBody[] {
 
 function setupEngine(): void {
     if (engine) return;
-    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     engine.runRenderLoop(() => {
         if (scene) {
             scene.render();
@@ -64,31 +87,31 @@ function createScene(): void {
         scene.dispose();
     }
 
-    scene = new BABYLON.Scene(engine);
-    glowLayer = new BABYLON.GlowLayer("glow", scene, { blurKernelSize: 18 });
+    scene = new Scene(engine);
+    glowLayer = new GlowLayer("glow", scene, { blurKernelSize: 18 });
     glowLayer.intensity = 0.38;
-    scene.clearColor = new BABYLON.Color4(0.02, 0.04, 0.07, 1);
+    scene.clearColor = new Color4(0.02, 0.04, 0.07, 1);
 
-    camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.4, 60, BABYLON.Vector3.Zero(), scene);
+    camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.4, 60, Vector3.Zero(), scene);
     camera.attachControl(canvas, true);
     camera.lowerRadiusLimit = 18;
     camera.upperRadiusLimit = 140;
     camera.wheelDeltaPercentage = 0.01;
     camera.minZ = 0.5;
 
-    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
     light.intensity = 0.05;
 
     createStarfield(scene, {
         count: 3200,
         radius: 340,
-        emissive: new BABYLON.Color3(1.35, 1.35, 1.3),
+        emissive: new Color3(1.35, 1.35, 1.3),
         scaleRange: [0.35, 1.25],
         tintVariance: true,
     });
     starMesh = createCenterStar(scene);
 
-    planetRoot = new BABYLON.TransformNode("planet-root", scene);
+    planetRoot = new TransformNode("planet-root", scene);
     buildPlanets();
 
     scene.onBeforeRenderObservable.add(() => {
@@ -134,7 +157,7 @@ function buildPlanets(): void {
         const style = bodyStyle({ ...cfg, hazards: [] }, cfg.distance);
         const { root, mesh, ring } = createPlanetMesh(cfg, style, scene);
         root.parent = planetRoot;
-        root.position = new BABYLON.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+        root.position = new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
         mesh.rotation.x = 0.25;
         mesh.rotation.z = 0.12;
         planets.push({ root, mesh, ring, shaderTime: 0 });
@@ -145,7 +168,7 @@ function buildPlanets(): void {
 
 function applyScale(scale: number): void {
     if (planetRoot) {
-        planetRoot.scaling = new BABYLON.Vector3(scale, scale, scale);
+        planetRoot.scaling = new Vector3(scale, scale, scale);
     }
     scaleValue.textContent = `${scale.toFixed(1)}x`;
 }
@@ -159,15 +182,15 @@ regenBtn.addEventListener("click", () => {
     buildPlanets();
 });
 
-function createCenterStar(s: BABYLON.Scene): BABYLON.Mesh {
-    const star = BABYLON.MeshBuilder.CreateSphere("center-star", { diameter: 6 }, s);
-    const mat = new BABYLON.StandardMaterial("center-star-mat", s);
-    mat.emissiveColor = new BABYLON.Color3(1.2, 1, 0.78);
+function createCenterStar(s: Scene): Mesh {
+    const star = MeshBuilder.CreateSphere("center-star", { diameter: 6 }, s);
+    const mat = new StandardMaterial("center-star-mat", s);
+    mat.emissiveColor = new Color3(1.2, 1, 0.78);
     mat.diffuseColor = mat.emissiveColor;
-    mat.specularColor = new BABYLON.Color3(1, 0.88, 0.7);
+    mat.specularColor = new Color3(1, 0.88, 0.7);
     mat.alpha = 0.99;
     star.material = mat;
-    const light = new BABYLON.PointLight("center-star-light", BABYLON.Vector3.Zero(), s);
+    const light = new PointLight("center-star-light", Vector3.Zero(), s);
     light.diffuse = mat.emissiveColor;
     light.specular = mat.specularColor;
     light.intensity = 0.55;

@@ -52,3 +52,8 @@ pub fn generate_universe(seed: u64) -> String {
 pub fn hex_grid(radius: u32) -> String {
     hex::grid_json(radius)
 }
+
+#[wasm_bindgen]
+pub fn hex_window(center_q: i32, center_r: i32, radius: u32) -> String {
+    hex::window_json(center_q, center_r, radius)
+}

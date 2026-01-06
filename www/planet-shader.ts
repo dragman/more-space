@@ -1,4 +1,4 @@
-import * as BABYLON from "babylonjs";
+import { Color3, Effect, ShaderMaterial, Vector3, Scene } from "@babylonjs/core";
 
 type PlanetMaterialStyle = {
   baseColor: number;
@@ -7,9 +7,9 @@ type PlanetMaterialStyle = {
 };
 
 function registerPlanetShaders(): void {
-  if (BABYLON.Effect.ShadersStore.planetVertexShader) return;
+  if (Effect.ShadersStore.planetVertexShader) return;
 
-  BABYLON.Effect.ShadersStore.planetVertexShader = `
+  Effect.ShadersStore.planetVertexShader = `
 precision highp float;
 attribute vec3 position;
 attribute vec3 normal;
@@ -30,7 +30,7 @@ void main(void) {
 }
 `;
 
-  BABYLON.Effect.ShadersStore.planetFragmentShader = `
+  Effect.ShadersStore.planetFragmentShader = `
 precision highp float;
 varying vec3 vNormal;
 varying vec2 vUV;
@@ -99,13 +99,13 @@ void main(void) {
 }
 
 export function createPlanetMaterial(
-  scene: BABYLON.Scene,
+  scene: Scene,
   style: PlanetMaterialStyle,
   seed: number
-): BABYLON.ShaderMaterial {
+): ShaderMaterial {
   registerPlanetShaders();
 
-  const mat = new BABYLON.ShaderMaterial(
+  const mat = new ShaderMaterial(
     `planetMat-${seed}`,
     scene,
     { vertex: "planet", fragment: "planet" },
@@ -115,12 +115,12 @@ export function createPlanetMaterial(
     }
   );
 
-  const base = new BABYLON.Color3(
+  const base = new Color3(
     ((style.baseColor >> 16) & 0xff) / 255,
     ((style.baseColor >> 8) & 0xff) / 255,
     (style.baseColor & 0xff) / 255
   );
-  const accent = new BABYLON.Color3(
+  const accent = new Color3(
     ((style.highlightColor >> 16) & 0xff) / 255,
     ((style.highlightColor >> 8) & 0xff) / 255,
     (style.highlightColor & 0xff) / 255
@@ -131,7 +131,7 @@ export function createPlanetMaterial(
   mat.setFloat("u_seed", seed % 1000);
   mat.setFloat("u_kind", style.kindId);
   mat.setFloat("u_time", 0);
-  mat.setVector3("u_lightDir", new BABYLON.Vector3(0.4, 0.8, 0.3));
+  mat.setVector3("u_lightDir", new Vector3(0.4, 0.8, 0.3));
   mat.setFloat("u_rimStrength", 0.1);
   mat.backFaceCulling = true;
   // mat.disableLighting = true;

@@ -27,38 +27,69 @@ impl CubeCoord {
     }
 }
 
+fn zigzag(v: i32) -> u32 {
+    ((v << 1) ^ (v >> 31)) as u32
+}
+
+fn pack_id(q: i32, r: i32) -> u64 {
+    ((zigzag(q) as u64) << 32) | zigzag(r) as u64
+}
+
+fn unpack_id(id: u64) -> (i32, i32) {
+    fn unzigzag(v: u32) -> i32 {
+        ((v >> 1) as i32) ^ -((v & 1) as i32)
+    }
+    let q = unzigzag((id >> 32) as u32);
+    let r = unzigzag(id as u32);
+    (q, r)
+}
+
 #[derive(Debug, Clone)]
 struct HexCell {
-    id: u32,
+    id: u64,
     coord: CubeCoord,
 }
 
 pub struct HexGrid {
     radius: u32,
+    center_q: i32,
+    center_r: i32,
     cells: Vec<HexCell>,
 }
 
 impl HexGrid {
     pub fn new(radius: u32) -> Self {
-        let r = radius as i32;
-        let mut cells = Vec::new();
-        let mut id = 0;
+        Self::window(0, 0, radius)
+    }
 
-        // Build a hexagon of radius r around the origin using cube coordinates.
-        for x in -r..=r {
-            for y in -r..=r {
-                let z = -x - y;
-                if z.abs() <= r {
+    pub fn window(center_q: i32, center_r: i32, radius: u32) -> Self {
+        let r = radius as i32;
+        let center_y = -center_q - center_r;
+        let mut cells = Vec::new();
+
+        for dx in -r..=r {
+            for dy in -r..=r {
+                let dz = -dx - dy;
+                if dz.abs() <= r {
+                    let x = center_q + dx;
+                    let y = center_y + dy;
+                    let z = center_r + dz;
+                    let coord = CubeCoord::new(x, y, z);
+                    let (q, r_axial) = coord.axial();
                     cells.push(HexCell {
-                        id,
-                        coord: CubeCoord::new(x, y, z),
+                        id: pack_id(q, r_axial),
+                        coord,
                     });
-                    id += 1;
                 }
             }
         }
 
-        Self { radius, cells }
+        Self {
+            radius,
+            center_q,
+            center_r,
+            cells,
+        }
     }
 
     pub fn diameter(&self) -> u32 {
@@ -76,7 +107,7 @@ impl HexGrid {
             .map(|cell| {
                 let (q, r) = cell.coord.axial();
                 HexCellView {
-                    id: cell.id,
+                    id: cell.id.to_string(),
                     key: cell.coord.key(),
                     x: cell.coord.x,
                     y: cell.coord.y,
@@ -92,6 +123,8 @@ impl HexGrid {
             radius: self.radius,
             diameter: self.diameter(),
             cell_count: self.cell_count(),
+            center_q: self.center_q,
+            center_r: self.center_r,
             cells,
         }
     }
@@ -99,7 +132,7 @@ impl HexGrid {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HexCellView {
-    pub id: u32,
+    pub id: String,
     pub key: String,
     pub x: i32,
     pub y: i32,
@@ -114,11 +147,19 @@ pub struct HexGridView {
     pub radius: u32,
     pub diameter: u32,
     pub cell_count: usize,
+    pub center_q: i32,
+    pub center_r: i32,
     pub cells: Vec<HexCellView>,
 }
 
 pub fn grid_json(radius: u32) -> String {
     let grid = HexGrid::new(radius);
+    let view = grid.view();
+    serde_json::to_string(&view).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn window_json(center_q: i32, center_r: i32, radius: u32) -> String {
+    let grid = HexGrid::window(center_q, center_r, radius);
     let view = grid.view();
     serde_json::to_string(&view).unwrap_or_else(|_| "{}".to_string())
 }
@@ -163,5 +204,12 @@ mod tests {
             assert_eq!(r, view_cell.r);
             assert_eq!(cell.coord.key(), view_cell.key);
         }
+    }
+
+    #[test]
+    fn packed_ids_round_trip() {
+        let id = pack_id(-3, 7);
+        let (q, r) = unpack_id(id);
+        assert_eq!((q, r), (-3, 7));
     }
 }
