@@ -320,13 +320,31 @@ function buildScene(grid: HexGrid): void {
     }
   });
 
-  const lineSystem = BABYLON.MeshBuilder.CreateLineSystem(
-    "grid-lines",
-    { lines, colors },
-    scene
-  );
-  lineSystem.isPickable = false;
-  lineSystem.renderingGroupId = 1;
+  const GreasedLineBuilder = (BABYLON as any).GreasedLineBuilder;
+  if (GreasedLineBuilder?.CreateGreasedLine) {
+    const greased = GreasedLineBuilder.CreateGreasedLine(
+      "grid-lines",
+      {
+        points: lines,
+        colors,
+        useColors: true,
+        width: 0.05,
+        multiLine: true,
+      },
+      scene
+    );
+    greased.isPickable = false;
+    greased.renderingGroupId = 1;
+    greased.applyFog = true;
+  } else {
+    const lineSystem = BABYLON.MeshBuilder.CreateLineSystem(
+      "grid-lines",
+      { lines, colors },
+      scene
+    );
+    lineSystem.isPickable = false;
+    lineSystem.renderingGroupId = 1;
+  }
 
   const hexPoints: BABYLON.Vector3[] = [];
   for (let i = 0; i <= 6; i++) {
