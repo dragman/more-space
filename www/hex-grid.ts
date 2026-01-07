@@ -71,6 +71,9 @@ const app = {
     systemStarCreated: false,
 };
 
+const clickedCells: Array<{ q: number; r: number; id: string }> = [];
+const clickedLabels = new Map<string, Mesh>();
+
 function ensureEngine(): void {
     if (app.engine) return;
     app.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
@@ -212,27 +215,60 @@ function describeCell(cell: HexCell): string {
     return `ID ${cell.id} · key ${cell.key} · q${cell.q} r${cell.r} · xyz(${cell.x}, ${cell.y}, ${cell.z}) · dist ${cell.distance}`;
 }
 
+function roundtripStatus(cell: HexCell): string {
+    try {
+        const clicked = clickedCells.map(({ q, r }) => [q, r] as [number, number]);
+        const res = JSON.parse(hex_window(cell.q, cell.r, 0, clicked)) as HexGrid;
+        const found = res.cells.find((c) => c.q === cell.q && c.r === cell.r);
+        if (!found) return "roundtrip: missing";
+        return found.id === cell.id ? "roundtrip: ok" : `roundtrip: mismatch wasm=${found.id}`;
+    } catch (e) {
+        return "roundtrip: error";
+    }
+}
+
 function setupPointerHandling(s: Scene): void {
     const plane = new Plane(0, 1, 0, 0);
     const KEY_PAN_SPEED = 0.8;
     const keysDown = new Set<string>();
 
     s.onPointerObservable.add((pointerInfo: PointerInfo) => {
+        const cam = s.activeCamera as ArcRotateCamera;
+        if (!cam) return;
+        const ray = s.createPickingRay(s.pointerX, s.pointerY, Matrix.Identity(), cam);
+        const dist = ray.intersectsPlane(plane);
+
         if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
-            const cam = s.activeCamera as ArcRotateCamera;
-            const ray = s.createPickingRay(s.pointerX, s.pointerY, Matrix.Identity(), cam);
-            const dist = ray.intersectsPlane(plane);
             if (dist !== null && dist !== undefined) {
                 const hit = ray.origin.add(ray.direction.scale(dist));
                 const cell = worldToCell(hit);
                 if (cell) {
                     setHover(cell, s);
-                    infoPanel.textContent = describeCell(cell);
+                    infoPanel.textContent = `${describeCell(cell)} · ${roundtripStatus(cell)} · clicked ${clickedCells.length}`;
                     return;
                 }
             }
             setHover(null, s);
             infoPanel.textContent = "Hover a hex to see details.";
+        } else if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+            if (dist !== null && dist !== undefined) {
+                const hit = ray.origin.add(ray.direction.scale(dist));
+                const cell = worldToCell(hit);
+                if (cell) {
+                    const exists = clickedCells.find((c) => c.q === cell.q && c.r === cell.r);
+                    if (!exists) {
+                        clickedCells.push({ q: cell.q, r: cell.r, id: cell.id });
+                        const key = `${cell.q},${cell.r}`;
+                        if (!clickedLabels.has(key) && app.scene) {
+                            const label = createLabel(cell.id, app.scene);
+                            const pos = axialToWorld(cell.q, cell.r);
+                            label.position = pos.add(new Vector3(0, HEX_HEIGHT * 2.5, 0));
+                            clickedLabels.set(key, label);
+                        }
+                    }
+                    infoPanel.textContent = `${describeCell(cell)} · ${roundtripStatus(cell)} · clicked ${clickedCells.length}`;
+                }
+            }
         }
     });
 
