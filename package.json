@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@babylonjs/core": "^8.44.1",
+    "@babylonjs/inspector": "^8.44.1",
     "@babylonjs/materials": "^8.44.1"
   }
 }

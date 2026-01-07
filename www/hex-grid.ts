@@ -1,7 +1,7 @@
-import initWasm, { hex_window } from "../pkg/more_space.js";
 import {
     AbstractMesh,
     ArcRotateCamera,
+    Axis,
     Color3,
     Color4,
     DynamicTexture,
@@ -19,10 +19,11 @@ import {
     StandardMaterial,
     TransformNode,
     Vector3,
-    Axis,
 } from "@babylonjs/core";
 import { CreateGreasedLine } from "@babylonjs/core/Meshes/Builders/greasedLineBuilder";
-import { createStarfield, hexToColor3, createNebula, createSystemStar } from "./planet-helpers";
+import "@babylonjs/inspector";
+import initWasm, { hex_window } from "../pkg/more_space.js";
+import { createNebula, createStarfield, createSystemStar, hexToColor3 } from "./planet-helpers";
 
 type HexCell = {
     id: string; // canonical packed id from Rust
@@ -350,13 +351,17 @@ function ensureScene(): Scene {
     if (app.scene) return app.scene;
 
     app.scene = new Scene(app.engine as Engine);
+    app.scene.debugLayer.show({
+        embedMode: true,
+    });
     app.scene.clearColor = new Color4(0.02, 0.04, 0.08, 1);
     app.glowLayer = new GlowLayer("hex-glow", app.scene, { blurKernelSize: 32 });
-    app.glowLayer.intensity = 0.9;
+    app.glowLayer.intensity = 0.1;
     // Edge fog to fade distant cells.
     app.scene.fogMode = Scene.FOGMODE_EXP2;
-    app.scene.fogDensity = 0.005;
+    app.scene.fogDensity = 0.0005;
     app.scene.fogColor = new Color3(0.02, 0.04, 0.08);
+    app.scene.fogStart = 2000;
 
     const camera = new ArcRotateCamera(
         "hex-cam",
@@ -388,13 +393,13 @@ function ensureScene(): Scene {
     light.groundColor = new Color3(0.04, 0.07, 0.12);
 
     // Single starfield with damped parallax so the distant system star feels consistent.
-    createStarfield(app.scene, { baseName: "star-locked", radius: 650, lockToCamera: true });
-    // Keep starfield crisp by disabling fog on star meshes.
-    app.scene.meshes
-        .filter((m) => m.name.startsWith("star"))
-        .forEach((m) => {
-            m.applyFog = false;
-        });
+    createStarfield(app.scene, {
+        baseName: "starfield",
+        radius: 3650,
+        count: 10000,
+        scaleRange: [2.0, 4.3],
+        tintVariance: true,
+    });
 
     if (!app.nebulaCreated) {
         // Soft, distant nebula below the grid to give regional mood.
@@ -413,7 +418,7 @@ function ensureScene(): Scene {
 
     if (!app.systemStarCreated) {
         createSystemStar(app.scene, {
-            color: new Color3(1.0, 0.86, 0.58),
+            color: new Color3(1.0, 0.56, 0.58),
             intensity: 2.6,
             size: 420,
             position: new Vector3(-900, -520, -2600),
@@ -436,7 +441,11 @@ function ensureHoverMeshes(s: Scene): void {
         hexPoints.push(new Vector3(Math.cos(angle) * HEX_SIZE, HEX_HEIGHT, Math.sin(angle) * HEX_SIZE));
     }
 
-    app.hoverLine = MeshBuilder.CreateLines("hover-line", { points: hexPoints, updatable: false }, app.scene) as LinesMesh;
+    app.hoverLine = MeshBuilder.CreateLines(
+        "hover-line",
+        { points: hexPoints, updatable: false },
+        app.scene
+    ) as LinesMesh;
     app.hoverLine.color = hexToColor3(0xffffff);
     app.hoverLine.isVisible = false;
     app.hoverLine.isPickable = false;
@@ -483,11 +492,7 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
         for (let i = 0; i <= 6; i++) {
             const angle = Math.PI / 6 + (i / 6) * Math.PI * 2;
             loop.push(
-                new Vector3(
-                    center.x + Math.cos(angle) * HEX_SIZE,
-                    HEX_HEIGHT,
-                    center.z + Math.sin(angle) * HEX_SIZE
-                )
+                new Vector3(center.x + Math.cos(angle) * HEX_SIZE, HEX_HEIGHT, center.z + Math.sin(angle) * HEX_SIZE)
             );
         }
         polyPoints.push(loop);

@@ -29,7 +29,6 @@ export type StarfieldOptions = {
     emissive?: Color3;
     scaleRange?: [number, number];
     tintVariance?: boolean;
-    lockToCamera?: boolean; // if true, stars follow camera target for zero parallax
 };
 
 export type NebulaOptions = {
@@ -39,7 +38,6 @@ export type NebulaOptions = {
     size?: number;
     y?: number;
     scale?: number;
-    speed?: number; // legacy (kept for compatibility)
     rotationSpeed?: number;
     name?: string;
 };
@@ -191,6 +189,7 @@ export function createStarfield(scene: Scene, opts: StarfieldOptions = {}): void
     const base = MeshBuilder.CreateSphere(`${baseName}-base`, { diameter: 1 }, scene);
     base.material = starMaterial;
     base.isPickable = false;
+    base.applyFog = false;
     base.setEnabled(false);
 
     const [minScale, maxScale] = scaleRange;
@@ -206,21 +205,6 @@ export function createStarfield(scene: Scene, opts: StarfieldOptions = {}): void
             instanced.color = new Color4(sparkle, tint, 1, 1);
         }
         inst.isPickable = false;
-    }
-
-    if (opts.lockToCamera && scene.activeCamera) {
-        const baseTarget = scene.activeCamera.target.clone();
-        scene.onBeforeRenderObservable.add(() => {
-            const cam = scene.activeCamera;
-            if (!cam) return;
-            const delta = cam.target.subtract(baseTarget);
-            scene.meshes
-                .filter((m) => m.name.startsWith(baseName))
-                .forEach((m) => {
-                    m.position.subtractInPlace(delta.scale(0.9)); // dampened follow to reduce parallax
-                });
-            baseTarget.copyFrom(cam.target);
-        });
     }
 }
 
@@ -291,7 +275,6 @@ export function createNebula(scene: Scene, opts: NebulaOptions = {}): Mesh {
     const size = opts.size ?? 6000;
     const y = opts.y ?? -180;
     const scale = opts.scale ?? 1.4;
-    const speed = opts.speed ?? 0.00001; // kept for compatibility, not used
     const rotationSpeed = opts.rotationSpeed ?? 0.0000025;
     const name = opts.name ?? "nebula";
 
