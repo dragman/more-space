@@ -351,9 +351,9 @@ function ensureScene(): Scene {
     if (app.scene) return app.scene;
 
     app.scene = new Scene(app.engine as Engine);
-    app.scene.debugLayer.show({
-        embedMode: true,
-    });
+    // app.scene.debugLayer.show({
+    //     embedMode: true,
+    // });
     app.scene.clearColor = new Color4(0.02, 0.04, 0.08, 1);
     app.glowLayer = new GlowLayer("hex-glow", app.scene, { blurKernelSize: 32 });
     app.glowLayer.intensity = 0.1;
