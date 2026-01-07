@@ -1,4 +1,4 @@
-import initWasm, { hex_window } from "../pkg/more_space.js";
+import initWasm, { hex_window } from "/pkg/more_space.js";
 import {
     AbstractMesh,
     ArcRotateCamera,

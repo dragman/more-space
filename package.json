@@ -5,7 +5,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "bash -lc 'source ~/.nvm/nvm.sh && nvm use >/dev/null && npx tsc --noEmit'"
+    "typecheck": "bash -lc 'source ~/.nvm/nvm.sh && nvm use >/dev/null && npx tsc --noEmit'",
+    "wasm": "wasm-pack build --target web --out-dir pkg --out-name more_space",
+    "build:local": "npm run wasm && npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

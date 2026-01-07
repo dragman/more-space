@@ -27,6 +27,12 @@ jobs:
           node-version-file: ".nvmrc"
           cache: "npm"
 
+      - name: Install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Build wasm pkg
+        run: wasm-pack build --target web --out-dir pkg --out-name more_space
+
       - name: Install
         run: npm ci
 

@@ -17,7 +17,7 @@ import {
     TransformNode,
     Vector3,
 } from "@babylonjs/core";
-import initWasm, { generate_universe } from "../pkg/more_space.js";
+import initWasm, { generate_universe } from "/pkg/more_space.js";
 import {
     bodyStyle,
     createOrbitLine,
