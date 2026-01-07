@@ -395,9 +395,9 @@ function ensureScene(): Scene {
     // Single starfield with damped parallax so the distant system star feels consistent.
     createStarfield(app.scene, {
         baseName: "starfield",
-        radius: 3650,
+        radius: 8400,
         count: 10000,
-        scaleRange: [2.0, 4.3],
+        scaleRange: [2.2, 10.6],
         tintVariance: true,
     });
 

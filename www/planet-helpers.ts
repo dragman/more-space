@@ -1,8 +1,8 @@
 import {
     Color3,
     Color4,
-    InstancedMesh,
     LinesMesh,
+    Matrix,
     Mesh,
     MeshBuilder,
     Scene,
@@ -11,6 +11,7 @@ import {
     Vector3,
     Texture,
     DynamicTexture,
+    Quaternion,
 } from "@babylonjs/core";
 import { createPlanetMaterial } from "./planet-shader";
 
@@ -177,7 +178,7 @@ export function createOrbitLine(radius: number, s: Scene, opts: OrbitLineOptions
 }
 
 export function createStarfield(scene: Scene, opts: StarfieldOptions = {}): void {
-    const count = opts.count ?? 5000;
+    const count = opts.count ?? 3000;
     const radius = opts.radius ?? 650;
     const emissive = opts.emissive ?? new Color3(1, 1, 1);
     const scaleRange = opts.scaleRange ?? [0.5, 1.3];
@@ -186,26 +187,41 @@ export function createStarfield(scene: Scene, opts: StarfieldOptions = {}): void
     const starMaterial = new StandardMaterial(`${baseName}-mat`, scene);
     starMaterial.emissiveColor = emissive;
     starMaterial.disableLighting = true;
-    const base = MeshBuilder.CreateSphere(`${baseName}-base`, { diameter: 1 }, scene);
+    const base = MeshBuilder.CreateSphere(`${baseName}-base`, { diameter: 1, segments: 4 }, scene);
     base.material = starMaterial;
     base.isPickable = false;
     base.applyFog = false;
-    base.setEnabled(false);
+    base.alwaysSelectAsActiveMesh = true;
 
+    const matrices = new Float32Array(count * 16);
+    const colors = opts.tintVariance ? new Float32Array(count * 4) : null;
     const [minScale, maxScale] = scaleRange;
+    const tmp = Matrix.Identity();
+    const rot = Quaternion.Identity();
     for (let i = 0; i < count; i++) {
-        const inst = base.createInstance(`${baseName}-${i}`);
         const dir = randomUnitVector();
-        inst.position = dir.scale(radius * (0.6 + Math.random() * 0.4));
-        inst.scaling.scaleInPlace(minScale + Math.random() * (maxScale - minScale));
-        if (opts.tintVariance) {
+        const len = radius * (0.6 + Math.random() * 0.4);
+        const s = minScale + Math.random() * (maxScale - minScale);
+        Matrix.ComposeToRef(new Vector3(s, s, s), rot, dir.scale(len), tmp);
+        tmp.copyToArray(matrices, i * 16);
+        if (colors) {
             const sparkle = 0.65 + Math.random() * 0.9;
             const tint = 0.95 + Math.random() * 0.1;
-            const instanced = inst as InstancedMesh & { color?: Color4 };
-            instanced.color = new Color4(sparkle, tint, 1, 1);
+            colors[i * 4] = sparkle;
+            colors[i * 4 + 1] = tint;
+            colors[i * 4 + 2] = 1;
+            colors[i * 4 + 3] = 1;
         }
-        inst.isPickable = false;
     }
+    base.thinInstanceSetBuffer("matrix", matrices, 16);
+    if (colors) {
+        base.thinInstanceSetBuffer("color", colors, 4);
+    }
+    base.thinInstanceCount = count;
+    base.thinInstanceRefreshBoundingInfo(true);
+    base.freezeWorldMatrix();
+    starMaterial.freeze();
+    base.alwaysSelectAsActiveMesh = false;
 }
 
 export function randomUnitVector(): Vector3 {
@@ -328,11 +344,7 @@ export function createNebula(scene: Scene, opts: NebulaOptions = {}): Mesh {
     tex.opacityTexture = noiseTex as any;
     tex.specularColor = new Color3(0, 0, 0);
 
-    const plane = MeshBuilder.CreatePlane(
-        name,
-        { size, sideOrientation: Mesh.DOUBLESIDE },
-        scene
-    );
+    const plane = MeshBuilder.CreatePlane(name, { size, sideOrientation: Mesh.DOUBLESIDE }, scene);
     plane.material = tex;
     plane.position.y = y;
     plane.rotation.x = Math.PI / 2;
@@ -352,9 +364,7 @@ export function createSystemStar(scene: Scene, opts: SystemStarOptions = {}): Me
     const intensity = opts.intensity ?? 2.2;
     const size = opts.size ?? 380;
     const name = opts.name ?? "system-star";
-    const pos =
-        opts.position ??
-        new Vector3(0, -420, -1800); // behind and below the grid so it feels distant
+    const pos = opts.position ?? new Vector3(0, -420, -1800); // behind and below the grid so it feels distant
 
     const mat = new StandardMaterial(`${name}-mat`, scene);
     mat.disableLighting = true;
