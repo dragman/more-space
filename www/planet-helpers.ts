@@ -29,6 +29,7 @@ export type StarfieldOptions = {
     emissive?: Color3;
     scaleRange?: [number, number];
     tintVariance?: boolean;
+    lockToCamera?: boolean; // if true, stars follow camera target for zero parallax
 };
 
 export type NebulaOptions = {
@@ -205,6 +206,21 @@ export function createStarfield(scene: Scene, opts: StarfieldOptions = {}): void
             instanced.color = new Color4(sparkle, tint, 1, 1);
         }
         inst.isPickable = false;
+    }
+
+    if (opts.lockToCamera && scene.activeCamera) {
+        const baseTarget = scene.activeCamera.target.clone();
+        scene.onBeforeRenderObservable.add(() => {
+            const cam = scene.activeCamera;
+            if (!cam) return;
+            const delta = cam.target.subtract(baseTarget);
+            scene.meshes
+                .filter((m) => m.name.startsWith(baseName))
+                .forEach((m) => {
+                    m.position.subtractInPlace(delta.scale(0.9)); // dampened follow to reduce parallax
+                });
+            baseTarget.copyFrom(cam.target);
+        });
     }
 }
 

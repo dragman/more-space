@@ -1,4 +1,4 @@
-import initWasm, { hex_window } from "/pkg/more_space.js";
+import initWasm, { hex_window } from "../pkg/more_space.js";
 import {
     AbstractMesh,
     ArcRotateCamera,
@@ -53,40 +53,29 @@ const HEX_SIZE = 2.3;
 const HEX_HEIGHT = 0.02; // effectively flat grid tiles
 const DEFAULT_RADIUS = 3; // cells around the focus to render
 
-let engine: Engine | null = null;
-let scene: Scene | null = null;
-let hoverLine: LinesMesh | null = null;
-let hoverFill: Mesh | null = null;
-let hoverLabel: Mesh | null = null;
-let glowLayer: GlowLayer | null = null;
-let edgeScrollActive = false;
-let edgeScrollTimer: number | null = null;
-let maxPanRange = 0;
-const cellLookup = new Map<string, HexCell>();
-let gridLines: AbstractMesh | null = null;
-let gridLinesKind: "greased" | null = null;
-let currentCenter: { q: number; r: number } | null = null;
-let currentRadius = DEFAULT_RADIUS;
-let nebulaCreated = false;
-let systemStarCreated = false;
-
-function hashColor(key: string): Color3 {
-    let h = 0;
-    for (let i = 0; i < key.length; i++) {
-        h = (h * 131 + key.charCodeAt(i)) >>> 0;
-    }
-    const r = 0.3 + ((h & 0xff) / 255) * 0.7;
-    const g = 0.3 + (((h >> 8) & 0xff) / 255) * 0.7;
-    const b = 0.3 + (((h >> 16) & 0xff) / 255) * 0.7;
-    return new Color3(r, g, b);
-}
+const app = {
+    engine: null as Engine | null,
+    scene: null as Scene | null,
+    hoverLine: null as LinesMesh | null,
+    hoverFill: null as Mesh | null,
+    hoverLabel: null as Mesh | null,
+    glowLayer: null as GlowLayer | null,
+    edgeScrollActive: false,
+    edgeScrollTimer: null as number | null,
+    maxPanRange: 0,
+    gridLines: null as AbstractMesh | null,
+    currentCenter: null as { q: number; r: number } | null,
+    currentRadius: DEFAULT_RADIUS,
+    nebulaCreated: false,
+    systemStarCreated: false,
+};
 
 function ensureEngine(): void {
-    if (engine) return;
-    engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    window.addEventListener("resize", () => engine?.resize());
-    engine.runRenderLoop(() => {
-        scene?.render();
+    if (app.engine) return;
+    app.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    window.addEventListener("resize", () => app.engine?.resize());
+    app.engine.runRenderLoop(() => {
+        app.scene?.render();
     });
 }
 
@@ -153,8 +142,6 @@ function worldToCell(pos: Vector3): HexCell | null {
     const y = -x - z;
     const rounded = cubeRound(x, y, z);
     const key = `${rounded.x},${rounded.y},${rounded.z}`;
-    const existing = cellLookup.get(key);
-    if (existing) return existing;
     const id = packId(rounded.x, rounded.z);
     return {
         id,
@@ -171,27 +158,26 @@ function worldToCell(pos: Vector3): HexCell | null {
 function setHover(cell: HexCell | null, s: Scene): void {
     // Guarantee hover meshes exist when pointer moves.
     ensureHoverMeshes(s);
-    if (!hoverLine || !hoverFill || !hoverLabel) return;
+    if (!app.hoverLine || !app.hoverFill || !app.hoverLabel) return;
     if (!cell) {
-        hoverLine.isVisible = false;
-        hoverFill.isVisible = false;
-        hoverLabel.isVisible = false;
-        const fillMat = hoverFill.material as StandardMaterial;
+        app.hoverLine.isVisible = false;
+        app.hoverFill.isVisible = false;
+        app.hoverLabel.isVisible = false;
+        const fillMat = app.hoverFill.material as StandardMaterial;
         if (fillMat) fillMat.alpha = 0.0;
-        cellLookup.clear();
-        if (gridLines) {
-            gridLines.setEnabled(false);
+        if (app.gridLines) {
+            app.gridLines.setEnabled(false);
         }
         infoPanel.textContent = "Hover a hex to see details.";
         return;
     }
 
     const center = axialToWorld(cell.q, cell.r);
-    hoverLine.position = center;
-    hoverFill.position = center.add(new Vector3(0, HEX_HEIGHT * 0.4, 0));
-    hoverLabel.position = center.add(new Vector3(0, HEX_HEIGHT * 2, 0));
+    app.hoverLine.position = center;
+    app.hoverFill.position = center.add(new Vector3(0, HEX_HEIGHT * 0.4, 0));
+    app.hoverLabel.position = center.add(new Vector3(0, HEX_HEIGHT * 2, 0));
 
-    const mat = hoverLabel.material as StandardMaterial;
+    const mat = app.hoverLabel.material as StandardMaterial;
     const tex = mat?.diffuseTexture as DynamicTexture;
     if (tex) {
         tex.clear();
@@ -206,18 +192,18 @@ function setHover(cell: HexCell | null, s: Scene): void {
             true
         );
     }
-    hoverLine.isVisible = true;
-    hoverFill.isVisible = true;
-    const fillMat = hoverFill.material as StandardMaterial;
+    app.hoverLine.isVisible = true;
+    app.hoverFill.isVisible = true;
+    const fillMat = app.hoverFill.material as StandardMaterial;
     if (fillMat) fillMat.alpha = 0.35;
-    hoverLabel.isVisible = true;
+    app.hoverLabel.isVisible = true;
 
-    if (!currentCenter || currentCenter.q !== cell.q || currentCenter.r !== cell.r) {
-        currentCenter = { q: cell.q, r: cell.r };
-        currentRadius = parseRadiusCap();
-        renderGrid(cell.q, cell.r, currentRadius, s);
-    } else if (gridLines) {
-        gridLines.setEnabled(true);
+    if (!app.currentCenter || app.currentCenter.q !== cell.q || app.currentCenter.r !== cell.r) {
+        app.currentCenter = { q: cell.q, r: cell.r };
+        app.currentRadius = parseRadiusCap();
+        renderGrid(cell.q, cell.r, app.currentRadius, s);
+    } else if (app.gridLines) {
+        app.gridLines.setEnabled(true);
     }
 }
 
@@ -250,8 +236,8 @@ function setupPointerHandling(s: Scene): void {
     });
 
     const handleKeyPan = (dtMs: number) => {
-        if (!scene || !scene.activeCamera) return;
-        const cam = scene.activeCamera as ArcRotateCamera;
+        if (!app.scene || !app.scene.activeCamera) return;
+        const cam = app.scene.activeCamera as ArcRotateCamera;
         const forward = cam.getDirection(Axis.Z);
         const right = cam.getDirection(Axis.X);
         forward.y = 0;
@@ -272,8 +258,8 @@ function setupPointerHandling(s: Scene): void {
         const offset = right.scale(dx * scale).add(forward.scale(-dz * scale));
         cam.target.addInPlace(offset);
         const len = cam.target.length();
-        if (len > maxPanRange) {
-            cam.target.scaleInPlace(maxPanRange / len);
+        if (len > app.maxPanRange) {
+            cam.target.scaleInPlace(app.maxPanRange / len);
         }
     };
 
@@ -310,16 +296,16 @@ function setupPointerHandling(s: Scene): void {
     const PAN_SPEED = 0.0008;
     const clampTarget = (cam: ArcRotateCamera) => {
         const len = cam.target.length();
-        if (len > maxPanRange) {
-            cam.target.scaleInPlace(maxPanRange / len);
+        if (len > app.maxPanRange) {
+            cam.target.scaleInPlace(app.maxPanRange / len);
         }
     };
     const loop = () => {
-        if (!edgeScrollActive || !scene || !scene.activeCamera) return;
-        const cam = scene.activeCamera as ArcRotateCamera;
+        if (!app.edgeScrollActive || !app.scene || !app.scene.activeCamera) return;
+        const cam = app.scene.activeCamera as ArcRotateCamera;
         const rect = canvas.getBoundingClientRect();
-        const x = scene.pointerX;
-        const y = scene.pointerY;
+        const x = app.scene.pointerX;
+        const y = app.scene.pointerY;
         let dx = 0;
         let dz = 0;
         if (x < EDGE_PX) dx = -1;
@@ -328,7 +314,7 @@ function setupPointerHandling(s: Scene): void {
         else if (y > rect.height - EDGE_PX) dz = 1;
 
         if (dx !== 0 || dz !== 0) {
-            const dt = scene.getEngine().getDeltaTime();
+            const dt = app.scene.getEngine().getDeltaTime();
             const scale = PAN_SPEED * (cam.radius || 1) * dt;
             // Move in screen-space directions projected onto the grid plane based on current camera rotation.
             const forward = cam.getDirection(Axis.Z);
@@ -342,35 +328,35 @@ function setupPointerHandling(s: Scene): void {
             cam.target.addInPlace(offset);
             clampTarget(cam);
         }
-        edgeScrollTimer = requestAnimationFrame(loop) as unknown as number;
+        app.edgeScrollTimer = requestAnimationFrame(loop) as unknown as number;
     };
 
     canvas.addEventListener("mouseenter", () => {
-        edgeScrollActive = true;
-        if (edgeScrollTimer === null) {
-            edgeScrollTimer = requestAnimationFrame(loop) as unknown as number;
+        app.edgeScrollActive = true;
+        if (app.edgeScrollTimer === null) {
+            app.edgeScrollTimer = requestAnimationFrame(loop) as unknown as number;
         }
     });
     canvas.addEventListener("mouseleave", () => {
-        edgeScrollActive = false;
-        if (edgeScrollTimer !== null) {
-            cancelAnimationFrame(edgeScrollTimer);
-            edgeScrollTimer = null;
+        app.edgeScrollActive = false;
+        if (app.edgeScrollTimer !== null) {
+            cancelAnimationFrame(app.edgeScrollTimer);
+            app.edgeScrollTimer = null;
         }
     });
 }
 
 function ensureScene(): Scene {
-    if (scene) return scene;
+    if (app.scene) return app.scene;
 
-    scene = new Scene(engine as Engine);
-    scene.clearColor = new Color4(0.02, 0.04, 0.08, 1);
-    glowLayer = new GlowLayer("hex-glow", scene, { blurKernelSize: 32 });
-    glowLayer.intensity = 0.9;
+    app.scene = new Scene(app.engine as Engine);
+    app.scene.clearColor = new Color4(0.02, 0.04, 0.08, 1);
+    app.glowLayer = new GlowLayer("hex-glow", app.scene, { blurKernelSize: 32 });
+    app.glowLayer.intensity = 0.9;
     // Edge fog to fade distant cells.
-    scene.fogMode = Scene.FOGMODE_EXP2;
-    scene.fogDensity = 0.005;
-    scene.fogColor = new Color3(0.02, 0.04, 0.08);
+    app.scene.fogMode = Scene.FOGMODE_EXP2;
+    app.scene.fogDensity = 0.005;
+    app.scene.fogColor = new Color3(0.02, 0.04, 0.08);
 
     const camera = new ArcRotateCamera(
         "hex-cam",
@@ -378,7 +364,7 @@ function ensureScene(): Scene {
         Math.PI / 3.2, // more top-down
         80,
         Vector3.Zero(),
-        scene
+        app.scene
     );
     camera.lowerRadiusLimit = 18;
     camera.upperRadiusLimit = 120;
@@ -397,22 +383,22 @@ function ensureScene(): Scene {
     }
     camera.attachControl(canvas, true);
 
-    const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
+    const light = new HemisphericLight("light", new Vector3(0, 1, 0), app.scene);
     light.intensity = 0.7;
     light.groundColor = new Color3(0.04, 0.07, 0.12);
 
-    // Use the same starfield helper as the main page (defaults match main view).
-    createStarfield(scene);
+    // Single starfield with damped parallax so the distant system star feels consistent.
+    createStarfield(app.scene, { baseName: "star-locked", radius: 650, lockToCamera: true });
     // Keep starfield crisp by disabling fog on star meshes.
-    scene.meshes
+    app.scene.meshes
         .filter((m) => m.name.startsWith("star"))
         .forEach((m) => {
             m.applyFog = false;
         });
 
-    if (!nebulaCreated) {
+    if (!app.nebulaCreated) {
         // Soft, distant nebula below the grid to give regional mood.
-        createNebula(scene, {
+        createNebula(app.scene, {
             seed: 4242,
             color: new Color3(0.45, 0.72, 1.0),
             alpha: 0.45,
@@ -422,27 +408,27 @@ function ensureScene(): Scene {
             rotationSpeed: 0.0000015,
             name: "hex-nebula",
         });
-        nebulaCreated = true;
+        app.nebulaCreated = true;
     }
 
-    if (!systemStarCreated) {
-        createSystemStar(scene, {
+    if (!app.systemStarCreated) {
+        createSystemStar(app.scene, {
             color: new Color3(1.0, 0.86, 0.58),
             intensity: 2.6,
             size: 420,
             position: new Vector3(-900, -520, -2600),
             name: "hex-system-star",
         });
-        systemStarCreated = true;
+        app.systemStarCreated = true;
     }
 
-    setupPointerHandling(scene);
-    ensureHoverMeshes(scene);
-    return scene;
+    setupPointerHandling(app.scene);
+    ensureHoverMeshes(app.scene);
+    return app.scene;
 }
 
 function ensureHoverMeshes(s: Scene): void {
-    if (hoverLine && hoverFill && hoverLabel) return;
+    if (app.hoverLine && app.hoverFill && app.hoverLabel) return;
 
     const hexPoints: Vector3[] = [];
     for (let i = 0; i <= 6; i++) {
@@ -450,14 +436,14 @@ function ensureHoverMeshes(s: Scene): void {
         hexPoints.push(new Vector3(Math.cos(angle) * HEX_SIZE, HEX_HEIGHT, Math.sin(angle) * HEX_SIZE));
     }
 
-    hoverLine = MeshBuilder.CreateLines("hover-line", { points: hexPoints, updatable: false }, scene) as LinesMesh;
-    hoverLine.color = hexToColor3(0xffffff);
-    hoverLine.isVisible = false;
-    hoverLine.isPickable = false;
-    hoverLine.renderingGroupId = 3;
-    glowLayer?.addIncludedOnlyMesh(hoverLine);
+    app.hoverLine = MeshBuilder.CreateLines("hover-line", { points: hexPoints, updatable: false }, app.scene) as LinesMesh;
+    app.hoverLine.color = hexToColor3(0xffffff);
+    app.hoverLine.isVisible = false;
+    app.hoverLine.isPickable = false;
+    app.hoverLine.renderingGroupId = 3;
+    app.glowLayer?.addIncludedOnlyMesh(app.hoverLine);
 
-    hoverFill = MeshBuilder.CreateCylinder(
+    app.hoverFill = MeshBuilder.CreateCylinder(
         "hover-fill",
         {
             height: HEX_HEIGHT * 0.6,
@@ -465,36 +451,33 @@ function ensureHoverMeshes(s: Scene): void {
             diameterTop: HEX_SIZE * 1.9,
             diameterBottom: HEX_SIZE * 1.9,
         },
-        scene
+        app.scene
     );
-    hoverFill.rotation.y = Math.PI / 6;
-    const fillMat = new StandardMaterial("hover-fill-mat", scene);
+    app.hoverFill.rotation.y = Math.PI / 6;
+    const fillMat = new StandardMaterial("hover-fill-mat", app.scene);
     fillMat.diffuseColor = hexToColor3(0xaff3ff);
     fillMat.emissiveColor = hexToColor3(0xaff3ff).scale(0.8);
     fillMat.alpha = 0.0;
     fillMat.specularColor = Color3.Black();
-    hoverFill.material = fillMat;
-    hoverFill.isPickable = false;
-    hoverFill.renderingGroupId = 2;
-    hoverFill.isVisible = false;
-    glowLayer?.addIncludedOnlyMesh(hoverFill);
+    app.hoverFill.material = fillMat;
+    app.hoverFill.isPickable = false;
+    app.hoverFill.renderingGroupId = 2;
+    app.hoverFill.isVisible = false;
+    app.glowLayer?.addIncludedOnlyMesh(app.hoverFill);
 
-    hoverLabel = createLabel("", s);
-    hoverLabel.isVisible = false;
-    hoverLabel.renderingGroupId = 4;
+    app.hoverLabel = createLabel("", s);
+    app.hoverLabel.isVisible = false;
+    app.hoverLabel.renderingGroupId = 4;
 }
 
 function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene): void {
     const json = hex_window(centerQ, centerR, radius);
     const grid = JSON.parse(json) as HexGrid;
 
-    const maxDist = Math.max(1, grid.radius);
     const polyPoints: Vector3[][] = [];
     const centerWorld = axialToWorld(centerQ, centerR);
 
-    cellLookup.clear();
     grid.cells.forEach((cell) => {
-        cellLookup.set(cell.key, cell);
         const center = axialToWorld(cell.q - centerQ, cell.r - centerR); // relative to center so we can move the mesh
         const loop: Vector3[] = [];
         for (let i = 0; i <= 6; i++) {
@@ -511,13 +494,12 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
     });
 
     // If the radius hasn't changed, reuse the existing mesh and just move it.
-    if (gridLines && (gridLines as any).metadata?.radius === radius) {
-        gridLines.position = centerWorld;
-        gridLines.setEnabled(true);
+    if (app.gridLines && (app.gridLines as any).metadata?.radius === radius) {
+        app.gridLines.position = centerWorld;
+        app.gridLines.setEnabled(true);
     } else {
-        gridLines?.dispose(false, true);
-        gridLines = null;
-        gridLinesKind = null;
+        app.gridLines?.dispose(false, true);
+        app.gridLines = null;
 
         const opts: any = {
             points: polyPoints,
@@ -535,22 +517,21 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
         };
 
         const created = CreateGreasedLine(`grid-${radius}`, opts, { color: new Color3(0.37, 0.82, 1), width: 0.22 }, s);
-        gridLines = created || gridLines;
-        gridLinesKind = "greased";
-        if (gridLines) {
-            applyGridProps(gridLines);
+        app.gridLines = created || app.gridLines;
+        if (app.gridLines) {
+            applyGridProps(app.gridLines);
         }
     }
 
     // Always position to the hovered cell even when reusing geometry.
-    if (gridLines) {
-        gridLines.position = centerWorld;
+    if (app.gridLines) {
+        app.gridLines.position = centerWorld;
     }
 
     const farAxial = axialToWorld(grid.radius, 0);
     const farDiag = axialToWorld(grid.radius, -grid.radius);
     const maxExtent = Math.max(farAxial.length(), farDiag.length(), HEX_SIZE * 2);
-    maxPanRange = maxExtent * 0.8;
+    app.maxPanRange = maxExtent * 0.8;
     infoPanel.textContent = `Center q${centerQ} r${centerR}, radius ${radius}, cells ${grid.cells.length}`;
 }
 
@@ -563,12 +544,12 @@ function parseRadiusCap(): number {
 async function updateWindowFromCamera(): Promise<void> {
     const s = ensureScene();
     ensureHoverMeshes(s);
-    if (!currentCenter) {
-        gridLines?.setEnabled(false);
+    if (!app.currentCenter) {
+        app.gridLines?.setEnabled(false);
         return;
     }
-    currentRadius = parseRadiusCap();
-    renderGrid(currentCenter.q, currentCenter.r, currentRadius, s);
+    app.currentRadius = parseRadiusCap();
+    renderGrid(app.currentCenter.q, app.currentCenter.r, app.currentRadius, s);
 }
 
 async function run(): Promise<void> {
@@ -576,18 +557,18 @@ async function run(): Promise<void> {
     ensureEngine();
     ensureScene();
     radiusInput.value = radiusInput.value || `${DEFAULT_RADIUS}`;
-    currentRadius = parseRadiusCap();
-    currentCenter = null; // wait for hover to render
+    app.currentRadius = parseRadiusCap();
+    app.currentCenter = null; // wait for hover to render
 }
 
 rebuildBtn.addEventListener("click", () => {
-    currentRadius = parseRadiusCap();
+    app.currentRadius = parseRadiusCap();
     updateWindowFromCamera();
 });
 
 radiusInput.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter") {
-        currentRadius = parseRadiusCap();
+        app.currentRadius = parseRadiusCap();
         updateWindowFromCamera();
     }
 });
