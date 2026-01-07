@@ -9,6 +9,8 @@ import {
     StandardMaterial,
     TransformNode,
     Vector3,
+    Texture,
+    DynamicTexture,
 } from "@babylonjs/core";
 import { createPlanetMaterial } from "./planet-shader";
 
@@ -27,6 +29,26 @@ export type StarfieldOptions = {
     emissive?: Color3;
     scaleRange?: [number, number];
     tintVariance?: boolean;
+};
+
+export type NebulaOptions = {
+    seed?: number;
+    color?: Color3;
+    alpha?: number;
+    size?: number;
+    y?: number;
+    scale?: number;
+    speed?: number; // legacy (kept for compatibility)
+    rotationSpeed?: number;
+    name?: string;
+};
+
+export type SystemStarOptions = {
+    color?: Color3;
+    intensity?: number;
+    size?: number;
+    position?: Vector3;
+    name?: string;
 };
 
 export type OrbitalBody = {
@@ -193,4 +215,161 @@ export function randomUnitVector(): Vector3 {
     const y = Math.sin(phi) * Math.sin(theta);
     const z = Math.cos(phi);
     return new Vector3(x, y, z);
+}
+
+// Simple seeded PRNG for repeatable nebula noise.
+function mulberry32(seed: number): () => number {
+    return () => {
+        let t = (seed += 0x6d2b79f5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function fractalNoise2D(x: number, y: number): number {
+    // Basic value noise with 3 octaves for a cloudy look.
+    const hash = (ix: number, iy: number) => {
+        const n = ix * 374761393 + iy * 668265263;
+        let t = (n ^ (n << 13)) * 1274126177;
+        t = (t ^ (t >> 16)) >>> 0;
+        return (t / 0xffffffff - 0.5) * 2; // [-1,1]
+    };
+    let amp = 1;
+    let freq = 1;
+    let sum = 0;
+    let norm = 0;
+    for (let o = 0; o < 3; o++) {
+        const sx = Math.floor(x * freq);
+        const sy = Math.floor(y * freq);
+        const fx = x * freq - sx;
+        const fy = y * freq - sy;
+        const h00 = hash(sx, sy);
+        const h10 = hash(sx + 1, sy);
+        const h01 = hash(sx, sy + 1);
+        const h11 = hash(sx + 1, sy + 1);
+        const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+        const nx0 = lerp(h00, h10, fx);
+        const nx1 = lerp(h01, h11, fx);
+        const nxy = lerp(nx0, nx1, fy);
+        sum += nxy * amp;
+        norm += amp;
+        amp *= 0.55;
+        freq *= 2.3;
+    }
+    return sum / norm; // ~[-1,1]
+}
+
+export function createNebula(scene: Scene, opts: NebulaOptions = {}): Mesh {
+    const seed = opts.seed ?? 1337;
+    const rng = mulberry32(seed);
+    const base = opts.color ?? new Color3(0.55, 0.8, 1.0);
+    const hueJitter = rng() * 0.25 - 0.125;
+    const satJitter = rng() * 0.25 - 0.125;
+    const color = new Color3(
+        Math.min(1, Math.max(0, base.r + hueJitter)),
+        Math.min(1, Math.max(0, base.g + satJitter)),
+        Math.min(1, Math.max(0, base.b + satJitter * 0.8))
+    );
+    const alpha = opts.alpha ?? 0.6;
+    const size = opts.size ?? 6000;
+    const y = opts.y ?? -180;
+    const scale = opts.scale ?? 1.4;
+    const speed = opts.speed ?? 0.00001; // kept for compatibility, not used
+    const rotationSpeed = opts.rotationSpeed ?? 0.0000025;
+    const name = opts.name ?? "nebula";
+
+    const texSize = 512;
+    const tex = new StandardMaterial(`${name}-mat`, scene);
+    const noiseTex = new DynamicTexture(`${name}-tex`, texSize, scene, false);
+    const ctx = noiseTex.getContext();
+    if (!ctx) {
+        const fallback = MeshBuilder.CreatePlane(name, { size, sideOrientation: Mesh.DOUBLESIDE }, scene);
+        fallback.position.y = y;
+        fallback.rotation.x = Math.PI / 2;
+        fallback.isPickable = false;
+        fallback.applyFog = true;
+        return fallback;
+    }
+    const texRng = mulberry32(seed ^ 0x9e3779b1);
+    const img = new ImageData(texSize, texSize);
+    const offsX = rng() * 1000;
+    const offsY = rng() * 1000;
+    for (let yPix = 0; yPix < texSize; yPix++) {
+        for (let xPix = 0; xPix < texSize; xPix++) {
+            const nx = xPix / texSize;
+            const ny = yPix / texSize;
+            const n = fractalNoise2D(nx * 4 + offsX, ny * 4 + offsY) * 0.5 + 0.5;
+            const radial = Math.sqrt(Math.pow(nx - 0.5, 2) + Math.pow(ny - 0.5, 2));
+            const edgeFade = Math.pow(Math.max(0, 1 - radial * 1.6), 3); // kill square seams by fading edges
+            const c = Math.max(0, Math.min(1, n * edgeFade));
+            const idx = (yPix * texSize + xPix) * 4;
+            img.data[idx] = color.r * 255 * c;
+            img.data[idx + 1] = color.g * 255 * c;
+            img.data[idx + 2] = color.b * 255 * c;
+            img.data[idx + 3] = c * 255;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    noiseTex.hasAlpha = true;
+    noiseTex.update(false);
+    noiseTex.wrapU = Texture.CLAMP_ADDRESSMODE;
+    noiseTex.wrapV = Texture.CLAMP_ADDRESSMODE;
+    noiseTex.uScale = scale;
+    noiseTex.vScale = scale;
+
+    tex.diffuseColor = Color3.Black();
+    tex.emissiveTexture = noiseTex as any;
+    tex.emissiveColor = color.scale(1.1);
+    tex.alpha = alpha;
+    tex.alphaMode = 2; // additive to keep it visible through fog
+    tex.disableLighting = true;
+    tex.backFaceCulling = false;
+    tex.useAlphaFromDiffuseTexture = false;
+    tex.opacityTexture = noiseTex as any;
+    tex.specularColor = new Color3(0, 0, 0);
+
+    const plane = MeshBuilder.CreatePlane(
+        name,
+        { size, sideOrientation: Mesh.DOUBLESIDE },
+        scene
+    );
+    plane.material = tex;
+    plane.position.y = y;
+    plane.rotation.x = Math.PI / 2;
+    plane.isPickable = false;
+    plane.applyFog = false;
+
+    scene.onBeforeRenderObservable.add(() => {
+        const dt = scene.getEngine().getDeltaTime();
+        noiseTex.wAng += rotationSpeed * dt;
+    });
+
+    return plane;
+}
+
+export function createSystemStar(scene: Scene, opts: SystemStarOptions = {}): Mesh {
+    const color = opts.color ?? new Color3(1.0, 0.82, 0.55);
+    const intensity = opts.intensity ?? 2.2;
+    const size = opts.size ?? 380;
+    const name = opts.name ?? "system-star";
+    const pos =
+        opts.position ??
+        new Vector3(0, -420, -1800); // behind and below the grid so it feels distant
+
+    const mat = new StandardMaterial(`${name}-mat`, scene);
+    mat.disableLighting = true;
+    mat.emissiveColor = color.scale(intensity);
+    mat.alpha = 0.95;
+    mat.backFaceCulling = false;
+    mat.specularColor = new Color3(0, 0, 0);
+
+    const star = MeshBuilder.CreateSphere(name, { diameter: size, segments: 24 }, scene);
+    star.material = mat;
+    star.position = pos;
+    star.isPickable = false;
+    star.applyFog = false; // keep it bright
+
+    // Optional billboard-ish glow: slight scaling with camera distance could be added later.
+    return star;
 }

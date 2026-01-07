@@ -22,7 +22,7 @@ import {
     Axis,
 } from "@babylonjs/core";
 import { CreateGreasedLine } from "@babylonjs/core/Meshes/Builders/greasedLineBuilder";
-import { createStarfield, hexToColor3 } from "./planet-helpers";
+import { createStarfield, hexToColor3, createNebula, createSystemStar } from "./planet-helpers";
 
 type HexCell = {
     id: string; // canonical packed id from Rust
@@ -67,6 +67,8 @@ let gridLines: AbstractMesh | null = null;
 let gridLinesKind: "greased" | null = null;
 let currentCenter: { q: number; r: number } | null = null;
 let currentRadius = DEFAULT_RADIUS;
+let nebulaCreated = false;
+let systemStarCreated = false;
 
 function hashColor(key: string): Color3 {
     let h = 0;
@@ -407,6 +409,32 @@ function ensureScene(): Scene {
         .forEach((m) => {
             m.applyFog = false;
         });
+
+    if (!nebulaCreated) {
+        // Soft, distant nebula below the grid to give regional mood.
+        createNebula(scene, {
+            seed: 4242,
+            color: new Color3(0.45, 0.72, 1.0),
+            alpha: 0.45,
+            y: -220,
+            size: 6000,
+            scale: 1.4,
+            rotationSpeed: 0.0000015,
+            name: "hex-nebula",
+        });
+        nebulaCreated = true;
+    }
+
+    if (!systemStarCreated) {
+        createSystemStar(scene, {
+            color: new Color3(1.0, 0.86, 0.58),
+            intensity: 2.6,
+            size: 420,
+            position: new Vector3(-900, -520, -2600),
+            name: "hex-system-star",
+        });
+        systemStarCreated = true;
+    }
 
     setupPointerHandling(scene);
     ensureHoverMeshes(scene);
