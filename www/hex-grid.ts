@@ -23,7 +23,16 @@ import {
 import { CreateGreasedLine } from "@babylonjs/core/Meshes/Builders/greasedLineBuilder";
 import "@babylonjs/inspector";
 import initWasm, { hex_window } from "../pkg/more_space.js";
-import { createNebula, createStarfield, createSystemStar, hexToColor3 } from "./planet-helpers";
+import {
+    bodyStyle,
+    createNebula,
+    createPlanetMesh,
+    createStarfield,
+    createSystemStar,
+    hexToColor3,
+    OrbitalBody,
+    PlanetMesh,
+} from "./planet-helpers";
 
 type HexCell = {
     id: string; // canonical packed id from Rust
@@ -49,10 +58,19 @@ const canvas = document.getElementById("hexCanvas") as unknown as HTMLCanvasElem
 const radiusInput = document.getElementById("radiusInput") as HTMLInputElement;
 const rebuildBtn = document.getElementById("buildGrid") as HTMLButtonElement;
 const infoPanel = document.getElementById("hexInfo") as HTMLDivElement;
+const planetCountInput = document.getElementById("planetCount") as HTMLInputElement;
 
 const HEX_SIZE = 2.3;
 const HEX_HEIGHT = 0.02; // effectively flat grid tiles
 const DEFAULT_RADIUS = 3; // cells around the focus to render
+const DEFAULT_PLANET_COUNT = 6;
+const PLANET_Y_PADDING = 0.4;
+const PLANET_KINDS = ["Planetoid", "Moon", "AsteroidBelt"];
+const PLANET_SCALE_MULT = 20;
+const PLANET_SPREAD_MULT = 3.2;
+const PLAYABLE_RADIUS = 1000;
+const ORBIT_GAP = 260;
+const PLANET_Y_VARIANCE = 320;
 
 const app = {
     engine: null as Engine | null,
@@ -69,6 +87,10 @@ const app = {
     currentRadius: DEFAULT_RADIUS,
     nebulaCreated: false,
     systemStarCreated: false,
+    planetsRoot: null as TransformNode | null,
+    planetMeshes: [] as PlanetMesh[],
+    planetSettings: { count: 0 },
+    boundaryCircle: null as LinesMesh | null,
 };
 
 const clickedCells: Array<{ q: number; r: number; id: string }> = [];
@@ -106,6 +128,22 @@ function createLabel(text: string, s: Scene): Mesh {
     plane.isPickable = false;
     plane.position.y = HEX_HEIGHT * 1.8;
     return plane;
+}
+
+function createBoundaryCircle(s: Scene): LinesMesh {
+    const points: Vector3[] = [];
+    const segments = 160;
+    for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        points.push(new Vector3(Math.cos(angle) * PLAYABLE_RADIUS, HEX_HEIGHT * 0.2, Math.sin(angle) * PLAYABLE_RADIUS));
+    }
+    const line = MeshBuilder.CreateLines("playable-boundary", { points }, s);
+    line.color = hexToColor3(0x5ed0ff);
+    line.alpha = 0.35;
+    line.isPickable = false;
+    line.applyFog = true;
+    line.renderingGroupId = 1;
+    return line;
 }
 
 function zigzag(v: number): number {
@@ -157,6 +195,16 @@ function worldToCell(pos: Vector3): HexCell | null {
         r: rounded.z,
         distance: Math.max(Math.abs(rounded.x), Math.abs(rounded.y), Math.abs(rounded.z)),
     };
+}
+
+function isWorldPlayable(pos: Vector3): boolean {
+    const dist = Math.hypot(pos.x, pos.z);
+    return dist <= PLAYABLE_RADIUS - HEX_SIZE;
+}
+
+function isCellPlayable(cell: HexCell): boolean {
+    const center = axialToWorld(cell.q, cell.r);
+    return isWorldPlayable(center);
 }
 
 function setHover(cell: HexCell | null, s: Scene): void {
@@ -242,7 +290,7 @@ function setupPointerHandling(s: Scene): void {
             if (dist !== null && dist !== undefined) {
                 const hit = ray.origin.add(ray.direction.scale(dist));
                 const cell = worldToCell(hit);
-                if (cell) {
+                if (cell && isCellPlayable(cell)) {
                     setHover(cell, s);
                     infoPanel.textContent = `${describeCell(cell)} · ${roundtripStatus(cell)} · clicked ${clickedCells.length}`;
                     return;
@@ -254,7 +302,7 @@ function setupPointerHandling(s: Scene): void {
             if (dist !== null && dist !== undefined) {
                 const hit = ray.origin.add(ray.direction.scale(dist));
                 const cell = worldToCell(hit);
-                if (cell) {
+                if (cell && isCellPlayable(cell)) {
                     const exists = clickedCells.find((c) => c.q === cell.q && c.r === cell.r);
                     if (!exists) {
                         clickedCells.push({ q: cell.q, r: cell.r, id: cell.id });
@@ -294,7 +342,7 @@ function setupPointerHandling(s: Scene): void {
         const scale = KEY_PAN_SPEED * (cam.radius || 1) * dt;
         const offset = right.scale(dx * scale).add(forward.scale(-dz * scale));
         cam.target.addInPlace(offset);
-        const len = cam.target.length();
+        const len = Math.hypot(cam.target.x, cam.target.z);
         if (len > app.maxPanRange) {
             cam.target.scaleInPlace(app.maxPanRange / len);
         }
@@ -332,7 +380,7 @@ function setupPointerHandling(s: Scene): void {
     const EDGE_PX = 32;
     const PAN_SPEED = 0.0008;
     const clampTarget = (cam: ArcRotateCamera) => {
-        const len = cam.target.length();
+        const len = Math.hypot(cam.target.x, cam.target.z);
         if (len > app.maxPanRange) {
             cam.target.scaleInPlace(app.maxPanRange / len);
         }
@@ -437,6 +485,10 @@ function ensureScene(): Scene {
         tintVariance: true,
     });
 
+    if (!app.boundaryCircle) {
+        app.boundaryCircle = createBoundaryCircle(app.scene);
+    }
+
     if (!app.nebulaCreated) {
         // Soft, distant nebula below the grid to give regional mood.
         createNebula(app.scene, {
@@ -456,12 +508,14 @@ function ensureScene(): Scene {
         createSystemStar(app.scene, {
             color: new Color3(1.0, 0.56, 0.58),
             intensity: 2.6,
-            size: 420,
-            position: new Vector3(-900, -520, -2600),
+            size: 1020,
+            position: new Vector3(-900, -520, -4600),
             name: "hex-system-star",
         });
         app.systemStarCreated = true;
     }
+
+    app.maxPanRange = PLAYABLE_RADIUS - HEX_SIZE;
 
     setupPointerHandling(app.scene);
     ensureHoverMeshes(app.scene);
@@ -515,6 +569,160 @@ function ensureHoverMeshes(s: Scene): void {
     app.hoverLabel.renderingGroupId = 4;
 }
 
+function mulberry32(seed: number): () => number {
+    return () => {
+        let t = (seed += 0x6d2b79f5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function parsePlanetCount(): number {
+    const parsed = parseInt(planetCountInput?.value ?? "", 10);
+    if (Number.isNaN(parsed) || parsed < 0) return DEFAULT_PLANET_COUNT;
+    return Math.min(24, parsed);
+}
+
+function clearPlanets(): void {
+    app.planetMeshes.forEach((planet) => {
+        planet.ring?.dispose();
+        planet.mesh.dispose();
+        planet.root.dispose();
+    });
+    app.planetMeshes = [];
+    app.planetsRoot?.dispose();
+    app.planetsRoot = null;
+}
+
+function renderPlanets(s: Scene): void {
+    const count = parsePlanetCount();
+    if (count === 0) {
+        clearPlanets();
+        app.planetSettings = { count: 0 };
+        return;
+    }
+
+    if (app.planetsRoot && app.planetSettings.count === count) {
+        return;
+    }
+
+    clearPlanets();
+    const root = new TransformNode("hex-planets-root", s);
+    root.position = Vector3.Zero();
+    app.planetsRoot = root;
+    app.planetSettings = { count };
+
+    const seed = (count * 69069 + 1337) >>> 0;
+    const rng = mulberry32(seed);
+    const maxRadius = PLAYABLE_RADIUS - HEX_SIZE;
+    const minRadius = Math.max(HEX_SIZE * 3, maxRadius * (1 - 1 / PLANET_SPREAD_MULT));
+    const placed: Array<{ x: number; z: number; radius: number }> = [];
+    const usedCells = new Set<string>();
+    const orbitRadii: number[] = [];
+    const span = Math.max(HEX_SIZE * 6, maxRadius - minRadius);
+    const gap = Math.max(span / Math.max(1, count), ORBIT_GAP);
+    let start = minRadius + gap * 0.5;
+    const end = start + gap * (count - 1);
+    if (end > maxRadius) {
+        start = Math.max(minRadius, maxRadius - gap * (count - 1));
+    }
+    for (let i = 0; i < count; i++) {
+        const base = start + gap * i;
+        const jitter = (rng() * 0.3 - 0.15) * gap;
+        orbitRadii.push(Math.min(maxRadius, Math.max(minRadius, base + jitter)));
+    }
+    for (let i = orbitRadii.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [orbitRadii[i], orbitRadii[j]] = [orbitRadii[j], orbitRadii[i]];
+    }
+
+    for (let i = 0; i < count; i++) {
+        const kind = PLANET_KINDS[Math.floor(rng() * PLANET_KINDS.length)];
+        const orb: OrbitalBody = { name: `Planet ${i + 1}`, kind };
+        const distance = 250 + rng() * 700;
+        const style = bodyStyle(orb, distance);
+        const bodyRadius = (style.ring ? style.radius * 2.2 : style.radius * 1.1) * PLANET_SCALE_MULT;
+        const orbitRadius = orbitRadii[i] ?? maxRadius;
+
+        let x = 0;
+        let z = 0;
+        let placedOk = false;
+        let cell: HexCell | null = null;
+        for (let attempt = 0; attempt < 220; attempt++) {
+            const angle = rng() * Math.PI * 2;
+            const worldX = Math.cos(angle) * orbitRadius;
+            const worldZ = Math.sin(angle) * orbitRadius;
+            const candidate = worldToCell(new Vector3(worldX, 0, worldZ));
+            if (!candidate || !isCellPlayable(candidate)) continue;
+            const key = `${candidate.q},${candidate.r}`;
+            if (usedCells.has(key)) continue;
+            const center = axialToWorld(candidate.q, candidate.r);
+            if (!isWorldPlayable(center)) continue;
+
+            const ok = placed.every((p) => {
+                const dx = center.x - p.x;
+                const dz = center.z - p.z;
+                const minDist = bodyRadius + p.radius + HEX_SIZE * 4;
+                return dx * dx + dz * dz >= minDist * minDist;
+            });
+            if (ok) {
+                x = center.x;
+                z = center.z;
+                cell = candidate;
+                placedOk = true;
+                break;
+            }
+        }
+
+        if (!placedOk) {
+            for (let attempt = 0; attempt < 220; attempt++) {
+                const angle = rng() * Math.PI * 2;
+                const worldX = Math.cos(angle) * orbitRadius;
+                const worldZ = Math.sin(angle) * orbitRadius;
+                const candidate = worldToCell(new Vector3(worldX, 0, worldZ));
+                if (!candidate || !isCellPlayable(candidate)) continue;
+                const key = `${candidate.q},${candidate.r}`;
+                if (usedCells.has(key)) continue;
+                const center = axialToWorld(candidate.q, candidate.r);
+                x = center.x;
+                z = center.z;
+                cell = candidate;
+                placedOk = true;
+                break;
+            }
+        }
+
+        if (!placedOk) {
+            continue;
+        }
+
+        if (cell) {
+            usedCells.add(`${cell.q},${cell.r}`);
+        }
+        placed.push({ x, z, radius: bodyRadius });
+
+        const { root: planetRoot, mesh, ring } = createPlanetMesh(orb, style, s);
+        planetRoot.parent = root;
+        const yOffset = rng() * PLANET_Y_VARIANCE;
+        planetRoot.position = new Vector3(
+            x,
+            -(style.radius * PLANET_SCALE_MULT + PLANET_Y_PADDING + yOffset),
+            z
+        );
+        planetRoot.rotation.y = rng() * Math.PI * 2;
+        planetRoot.scaling = new Vector3(PLANET_SCALE_MULT, PLANET_SCALE_MULT, PLANET_SCALE_MULT);
+        mesh.isPickable = false;
+        mesh.renderingGroupId = 0;
+        ring?.setEnabled(true);
+        if (ring) {
+            ring.isPickable = false;
+            ring.renderingGroupId = 0;
+        }
+        app.planetMeshes.push({ root: planetRoot, mesh, ring });
+    }
+}
+
 function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene): void {
     const json = hex_window(centerQ, centerR, radius);
     const grid = JSON.parse(json) as HexGrid;
@@ -522,8 +730,11 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
     const polyPoints: Vector3[][] = [];
     const centerWorld = axialToWorld(centerQ, centerR);
 
+    let playableCount = 0;
     grid.cells.forEach((cell) => {
         const center = axialToWorld(cell.q - centerQ, cell.r - centerR); // relative to center so we can move the mesh
+        const worldCenter = new Vector3(centerWorld.x + center.x, 0, centerWorld.z + center.z);
+        if (!isWorldPlayable(worldCenter)) return;
         const loop: Vector3[] = [];
         for (let i = 0; i <= 6; i++) {
             const angle = Math.PI / 6 + (i / 6) * Math.PI * 2;
@@ -532,10 +743,23 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
             );
         }
         polyPoints.push(loop);
+        playableCount += 1;
     });
 
+    if (polyPoints.length === 0) {
+        app.gridLines?.setEnabled(false);
+        infoPanel.textContent = `Center q${centerQ} r${centerR}, radius ${radius}, cells 0`;
+        renderPlanets(s);
+        return;
+    }
+
     // If the radius hasn't changed, reuse the existing mesh and just move it.
-    if (app.gridLines && (app.gridLines as any).metadata?.radius === radius) {
+    if (
+        app.gridLines &&
+        (app.gridLines as any).metadata?.radius === radius &&
+        (app.gridLines as any).metadata?.centerQ === centerQ &&
+        (app.gridLines as any).metadata?.centerR === centerR
+    ) {
         app.gridLines.position = centerWorld;
         app.gridLines.setEnabled(true);
     } else {
@@ -553,7 +777,7 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
             (mesh as any).applyFog = true;
             mesh.alwaysSelectAsActiveMesh = true;
             mesh.setEnabled(true);
-            (mesh as any).metadata = { radius };
+            (mesh as any).metadata = { radius, centerQ, centerR };
             mesh.position = centerWorld;
         };
 
@@ -569,11 +793,9 @@ function renderGrid(centerQ: number, centerR: number, radius: number, s: Scene):
         app.gridLines.position = centerWorld;
     }
 
-    const farAxial = axialToWorld(grid.radius, 0);
-    const farDiag = axialToWorld(grid.radius, -grid.radius);
-    const maxExtent = Math.max(farAxial.length(), farDiag.length(), HEX_SIZE * 2);
-    app.maxPanRange = maxExtent * 0.8;
-    infoPanel.textContent = `Center q${centerQ} r${centerR}, radius ${radius}, cells ${grid.cells.length}`;
+    infoPanel.textContent = `Center q${centerQ} r${centerR}, radius ${radius}, cells ${playableCount}`;
+
+    renderPlanets(s);
 }
 
 function parseRadiusCap(): number {
@@ -585,11 +807,12 @@ function parseRadiusCap(): number {
 async function updateWindowFromCamera(): Promise<void> {
     const s = ensureScene();
     ensureHoverMeshes(s);
+    app.currentRadius = parseRadiusCap();
     if (!app.currentCenter) {
         app.gridLines?.setEnabled(false);
+        renderPlanets(s);
         return;
     }
-    app.currentRadius = parseRadiusCap();
     renderGrid(app.currentCenter.q, app.currentCenter.r, app.currentRadius, s);
 }
 
@@ -598,6 +821,7 @@ async function run(): Promise<void> {
     ensureEngine();
     ensureScene();
     radiusInput.value = radiusInput.value || `${DEFAULT_RADIUS}`;
+    planetCountInput.value = planetCountInput.value || `${DEFAULT_PLANET_COUNT}`;
     app.currentRadius = parseRadiusCap();
     app.currentCenter = null; // wait for hover to render
 }
@@ -610,6 +834,16 @@ rebuildBtn.addEventListener("click", () => {
 radiusInput.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter") {
         app.currentRadius = parseRadiusCap();
+        updateWindowFromCamera();
+    }
+});
+
+planetCountInput.addEventListener("change", () => {
+    updateWindowFromCamera();
+});
+
+planetCountInput.addEventListener("keydown", (evt) => {
+    if (evt.key === "Enter") {
         updateWindowFromCamera();
     }
 });

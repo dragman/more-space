@@ -18,6 +18,10 @@
       * {
         box-sizing: border-box;
       }
+      html,
+      body {
+        height: 100%;
+      }
       body {
         margin: 0;
         font-family: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -25,14 +29,16 @@
           radial-gradient(circle at 80% 10%, rgba(215, 123, 255, 0.08), transparent 40%),
           var(--bg);
         color: var(--text);
-        min-height: 100vh;
+        overflow: hidden;
       }
       #app {
         display: flex;
         flex-direction: column;
         gap: 12px;
-        height: 100vh;
-        padding: 14px 16px;
+        height: 100dvh;
+        width: 100vw;
+        padding: 0;
+        position: relative;
       }
       header {
         display: flex;
@@ -40,63 +46,75 @@
         justify-content: space-between;
         background: var(--panel);
         border-radius: 14px;
-        padding: 14px 16px;
+        padding: 8px 12px;
         box-shadow: var(--shadow);
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 3;
       }
       h1 {
-        margin: 0 0 6px;
+        margin: 0;
         letter-spacing: 0.02em;
+        font-size: 18px;
       }
       p {
         margin: 0;
         color: var(--muted);
+        font-size: 12px;
       }
       .controls {
         display: flex;
         align-items: center;
         gap: 10px;
+        flex-wrap: wrap;
       }
       input[type="number"] {
         background: #0c1225;
         color: var(--text);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        padding: 9px 10px;
+        padding: 6px 8px;
         border-radius: 10px;
         min-width: 140px;
+        font-size: 12px;
       }
       button {
         background: linear-gradient(135deg, var(--accent), var(--accent-2));
         border: none;
         color: #081020;
-        padding: 10px 14px;
+        padding: 7px 10px;
         border-radius: 10px;
         font-weight: 700;
         cursor: pointer;
         box-shadow: var(--shadow);
+        font-size: 12px;
       }
       .panel {
         background: linear-gradient(145deg, rgba(7, 10, 22, 0.92), rgba(14, 17, 29, 0.96));
-        border-radius: 14px;
-        padding: 12px;
-        box-shadow: var(--shadow);
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
         flex: 1 1 auto;
         min-height: 0;
+        margin: 0;
       }
       .map-panel {
         display: grid;
         grid-template-columns: 1fr;
-        grid-template-rows: 1fr 42px;
-        gap: 10px;
+        grid-template-rows: 1fr;
+        gap: 0;
         background: radial-gradient(circle at 20% 30%, rgba(94, 208, 255, 0.1), transparent 45%),
           radial-gradient(circle at 70% 60%, rgba(215, 123, 255, 0.1), transparent 45%),
           #05070f;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border: none;
       }
       #hexCanvas {
         width: 100%;
         height: 100%;
         min-height: 0;
         border-radius: 10px;
+        display: block;
       }
       .info {
         background: rgba(12, 18, 32, 0.8);
@@ -108,6 +126,11 @@
         gap: 10px;
         color: var(--text);
         font-size: 13px;
+        position: absolute;
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+        z-index: 2;
       }
       .tag {
         background: rgba(94, 208, 255, 0.18);
@@ -146,6 +169,7 @@
         </div>
         <div class="controls">
           <input id="radiusInput" type="number" min="0" max="25" placeholder="Radius (e.g. 3)" />
+          <input id="planetCount" type="number" min="0" max="24" placeholder="Planets (e.g. 6)" />
           <button id="buildGrid">Build grid</button>
           <a href="./index.html">Back to systems</a>
         </div>
