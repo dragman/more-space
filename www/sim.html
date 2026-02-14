@@ -47,17 +47,20 @@
         gap: 12px;
         background: var(--panel);
         border-radius: 14px;
-        padding: 14px 16px;
+        padding: 9px 12px;
         box-shadow: var(--shadow);
         flex: 0 0 auto;
       }
       h1 {
         margin: 0 0 6px 0;
         letter-spacing: 0.04em;
+        font-size: 18px;
+        line-height: 1.1;
       }
       p {
         margin: 0;
         color: var(--muted);
+        font-size: 12px;
       }
       .controls {
         display: flex;
@@ -67,7 +70,8 @@
         justify-content: flex-end;
       }
       input[type="text"],
-      input[type="number"] {
+      input[type="number"],
+      select {
         background: #0c1225;
         color: var(--text);
         border: 1px solid rgba(255, 255, 255, 0.12);
@@ -99,15 +103,7 @@
       .layout {
         flex: 1 1 auto;
         min-height: 0;
-        display: grid;
-        grid-template-columns: 2.8fr 1fr;
-        gap: 12px;
-      }
-      .main-stack {
-        display: grid;
-        grid-template-rows: 2.4fr 1fr;
-        gap: 12px;
-        min-height: 0;
+        position: relative;
       }
       .panel {
         background: linear-gradient(160deg, rgba(7, 11, 22, 0.92), rgba(12, 17, 31, 0.96));
@@ -162,7 +158,7 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
-        height: 100%;
+        max-height: 100%;
         overflow: hidden;
       }
       .summary-section {
@@ -172,21 +168,24 @@
         background: rgba(10, 16, 30, 0.7);
       }
       .grid-panel {
+        position: relative;
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        min-height: 260px;
-      }
-      .grid-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
+        min-height: 0;
+        height: 100%;
       }
       .grid-controls {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 6;
         display: flex;
         align-items: center;
         gap: 6px;
+        padding: 4px;
+        border-radius: 8px;
+        background: rgba(8, 12, 24, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.08);
       }
       .grid-controls input {
         min-width: 0;
@@ -200,6 +199,46 @@
         border-radius: 10px;
         border: 1px solid rgba(255, 255, 255, 0.05);
         overflow: hidden;
+      }
+      .overlay {
+        position: absolute;
+        z-index: 5;
+        width: min(420px, 42vw);
+        background: rgba(8, 12, 24, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 12px;
+        backdrop-filter: blur(8px);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .overlay > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 8px 10px;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text);
+        background: rgba(0, 0, 0, 0.16);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .overlay > summary::-webkit-details-marker {
+        display: none;
+      }
+      .overlay .panel-content {
+        max-height: 42dvh;
+        overflow: auto;
+        padding: 10px;
+      }
+      .overlay-log {
+        left: 14px;
+        right: 14px;
+        bottom: 14px;
+        width: auto;
+      }
+      .overlay-summary {
+        top: 14px;
+        right: 14px;
       }
       #gridSvg {
         width: 100%;
@@ -242,12 +281,6 @@
         text-decoration: underline;
       }
       @media (max-width: 980px) {
-        .layout {
-          grid-template-columns: 1fr;
-        }
-        .main-stack {
-          grid-template-rows: 1.4fr 1fr;
-        }
         header {
           flex-direction: column;
           align-items: flex-start;
@@ -255,6 +288,18 @@
         .controls {
           width: 100%;
           justify-content: flex-start;
+        }
+        .overlay {
+          position: static;
+          width: 100%;
+          margin-top: 8px;
+        }
+        .grid-controls {
+          top: 8px;
+          right: 8px;
+        }
+        .overlay .panel-content {
+          max-height: 28dvh;
         }
       }
     </style>
@@ -273,42 +318,48 @@
           <button id="stepBtn" class="secondary">Step</button>
           <button id="runBtn" class="secondary">Auto</button>
           <input id="speedInput" type="number" min="100" step="100" value="900" />
+          <select id="viewMode">
+            <option value="global">View: Global</option>
+          </select>
           <button id="clearBtn" class="secondary">Clear log</button>
           <a href="./index.html">Back to systems</a>
         </div>
       </header>
 
       <div class="layout">
-        <div class="main-stack">
-          <section class="panel grid-panel">
-            <div class="grid-header">
-              <h3>Hex Grid</h3>
-              <div class="grid-controls">
-                <input id="gridRadius" type="number" min="1" max="12" value="6" />
-                <button id="gridBtn" class="secondary">Render</button>
+        <section class="panel grid-panel">
+          <div class="grid-controls">
+            <input id="gridRadius" type="number" min="1" max="12" value="6" />
+            <button id="gridBtn" class="secondary">Render</button>
+          </div>
+          <div class="grid-wrap">
+            <svg id="gridSvg"></svg>
+          </div>
+
+          <details class="overlay overlay-summary">
+            <summary>Intel</summary>
+            <div class="panel-content summary">
+              <div class="summary-section">
+                <h3>Units</h3>
+                <div class="summary-list" id="unitList"></div>
+              </div>
+              <div class="summary-section">
+                <h3>Loot</h3>
+                <div class="summary-list" id="lootList"></div>
+              </div>
+              <div class="summary-section">
+                <h3>Belief Peaks</h3>
+                <div class="summary-list" id="beliefList"></div>
               </div>
             </div>
-            <div class="grid-wrap">
-              <svg id="gridSvg"></svg>
-            </div>
-          </section>
-          <section class="panel log">
+          </details>
+
+          <details class="overlay overlay-log">
+            <summary>Event Log</summary>
+            <div class="panel-content log">
             <div class="log-list" id="logList"></div>
-          </section>
-        </div>
-        <section class="panel summary">
-          <div class="summary-section">
-            <h3>Units</h3>
-            <div class="summary-list" id="unitList"></div>
-          </div>
-          <div class="summary-section">
-            <h3>Loot</h3>
-            <div class="summary-list" id="lootList"></div>
-          </div>
-          <div class="summary-section">
-            <h3>Belief Peaks</h3>
-            <div class="summary-list" id="beliefList"></div>
-          </div>
+            </div>
+          </details>
         </section>
       </div>
     </div>

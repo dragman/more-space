@@ -16,11 +16,18 @@ pub struct Game {
 impl Game {
     pub fn new(seed: u64) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let sim = SimState::new(&mut rng, SimConfig::default());
-        Self {
-            rng,
-            sim,
-        }
+        let mut config = SimConfig::default();
+        config.grid_radius = rng.gen_range(14..=20);
+        config.visible_radius = rng.gen_range(3..=5);
+        config.team_count = rng.gen_range(2..=5);
+        config.min_units_per_team = 2;
+        config.max_units_per_team = 6;
+        config.exit_points_count = rng.gen_range(3..=6);
+        config.max_loot = rng.gen_range(8..=18);
+        config.active_cooldown = rng.gen_range(3..=6);
+        config.belief_decay_rate = rng.gen_range(0.03..=0.1);
+        let sim = SimState::new(&mut rng, config);
+        Self { rng, sim }
     }
 
     pub fn next_f64(&mut self) -> f64 {
@@ -43,9 +50,7 @@ pub fn greeting_for(game: &mut Game) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::hazard::{
-        apply_hazard, hazard_profile, Hazard, HazardKind, RiskChannels,
-    };
+    use super::hazard::{apply_hazard, hazard_profile, Hazard, HazardKind, RiskChannels};
     use super::naming::generate_star_name;
     use super::system::{UniverseConfig, UniverseGenerator};
     use super::Game;

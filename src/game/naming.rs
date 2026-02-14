@@ -54,7 +54,11 @@ pub fn generate_star_name(rng: &mut ChaCha8Rng, used: &mut HashSet<String>) -> S
         let candidate = build_star_name_candidate(rng);
         let mut chars = candidate.chars();
         let capitalized = match chars.next() {
-            Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.collect::<String>()),
+            Some(first) => format!(
+                "{}{}",
+                first.to_ascii_uppercase(),
+                chars.collect::<String>()
+            ),
             None => continue,
         };
 
@@ -139,15 +143,7 @@ const NOUNS: &[&str] = &[
     "Memory",
 ];
 const VERBS: &[&str] = &[
-    "Waits",
-    "Sleeps",
-    "Echoes",
-    "Burns",
-    "Drifts",
-    "Remains",
-    "Flickers",
-    "Stands",
-    "Watches",
+    "Waits", "Sleeps", "Echoes", "Burns", "Drifts", "Remains", "Flickers", "Stands", "Watches",
     "Fades",
 ];
 
@@ -202,7 +198,10 @@ pub fn generate_nickname(
         (&[Token::Adjective, Token::Adjective, Token::Noun], 1),
         (&[Token::Article, Token::Noun, Token::Verb], 1),
         (&[Token::Adjective, Token::Noun, Token::Verb], 1),
-        (&[Token::Article, Token::Adjective, Token::Noun, Token::Verb], 1),
+        (
+            &[Token::Article, Token::Adjective, Token::Noun, Token::Verb],
+            1,
+        ),
     ];
 
     let total_weight: u32 = PATTERNS.iter().map(|(_, w)| w).sum();

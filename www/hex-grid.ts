@@ -265,8 +265,7 @@ function describeCell(cell: HexCell): string {
 
 function roundtripStatus(cell: HexCell): string {
     try {
-        const clicked = clickedCells.map(({ q, r }) => [q, r] as [number, number]);
-        const res = JSON.parse(hex_window(cell.q, cell.r, 0, clicked)) as HexGrid;
+        const res = JSON.parse(hex_window(cell.q, cell.r, 0)) as HexGrid;
         const found = res.cells.find((c) => c.q === cell.q && c.r === cell.r);
         if (!found) return "roundtrip: missing";
         return found.id === cell.id ? "roundtrip: ok" : `roundtrip: mismatch wasm=${found.id}`;

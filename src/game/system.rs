@@ -185,9 +185,9 @@ impl UniverseGenerator {
             return Vec::new();
         }
 
-        let count = self
-            .rng
-            .gen_range(0..=self.config.system.max_hazards_per_body as u32) as usize;
+        let count =
+            self.rng
+                .gen_range(0..=self.config.system.max_hazards_per_body as u32) as usize;
 
         let mut unique_kinds = HashSet::new();
         let mut hazards = Vec::with_capacity(count);
