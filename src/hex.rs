@@ -31,11 +31,11 @@ fn zigzag(v: i32) -> u32 {
     ((v << 1) ^ (v >> 31)) as u32
 }
 
-fn pack_id(q: i32, r: i32) -> u64 {
+pub fn pack_id(q: i32, r: i32) -> u64 {
     ((zigzag(q) as u64) << 32) | zigzag(r) as u64
 }
 
-fn unpack_id(id: u64) -> (i32, i32) {
+pub fn unpack_id(id: u64) -> (i32, i32) {
     fn unzigzag(v: u32) -> i32 {
         ((v >> 1) as i32) ^ -((v & 1) as i32)
     }
@@ -48,6 +48,12 @@ fn unpack_id(id: u64) -> (i32, i32) {
 struct HexCell {
     id: u64,
     coord: CubeCoord,
+}
+
+#[derive(Debug, Clone)]
+pub struct HexCellPos {
+    pub id: u64,
+    pub coord: CubeCoord,
 }
 
 pub struct HexGrid {
@@ -127,6 +133,16 @@ impl HexGrid {
             center_r: self.center_r,
             cells,
         }
+    }
+
+    pub fn cell_positions(&self) -> Vec<HexCellPos> {
+        self.cells
+            .iter()
+            .map(|cell| HexCellPos {
+                id: cell.id,
+                coord: cell.coord,
+            })
+            .collect()
     }
 }
 

@@ -29,8 +29,9 @@ pub fn init_game(seed: u64) {
 
 #[wasm_bindgen]
 pub fn tick() -> String {
-    match with_game_mut(|game| game.tick().to_string()) {
-        Ok(v) => v,
+    match with_game_mut(|game| serde_json::to_string(&game.tick())) {
+        Ok(Ok(v)) => v,
+        Ok(Err(_)) => "{}".to_string(),
         Err(e) => e.to_string(),
     }
 }

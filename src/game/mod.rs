@@ -1,21 +1,25 @@
 pub mod body;
 pub mod hazard;
 pub mod naming;
+pub mod sim;
 pub mod system;
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use sim::{SimConfig, SimState, TurnLog};
 
 pub struct Game {
-    turn: u32,
     rng: ChaCha8Rng,
+    sim: SimState,
 }
 
 impl Game {
     pub fn new(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let sim = SimState::new(&mut rng, SimConfig::default());
         Self {
-            turn: 0,
-            rng: ChaCha8Rng::seed_from_u64(seed),
+            rng,
+            sim,
         }
     }
 
@@ -27,9 +31,8 @@ impl Game {
         self.rng.gen()
     }
 
-    pub fn tick(&mut self) -> u32 {
-        self.turn += 1;
-        self.turn
+    pub fn tick(&mut self) -> TurnLog {
+        self.sim.tick(&mut self.rng)
     }
 }
 
@@ -56,9 +59,17 @@ mod tests {
         let mut g2 = Game::new(42);
 
         // Advance state and sample numbers; sequences should match.
-        assert_eq!(g1.tick(), g2.tick());
+        let log1 = g1.tick();
+        let log2 = g2.tick();
+        let json1 = serde_json::to_string(&log1).expect("serialize log");
+        let json2 = serde_json::to_string(&log2).expect("serialize log");
+        assert_eq!(json1, json2);
         assert_eq!(g1.next_u32(), g2.next_u32());
-        assert_eq!(g1.tick(), g2.tick());
+        let log1 = g1.tick();
+        let log2 = g2.tick();
+        let json1 = serde_json::to_string(&log1).expect("serialize log");
+        let json2 = serde_json::to_string(&log2).expect("serialize log");
+        assert_eq!(json1, json2);
         assert_eq!(g1.next_u32(), g2.next_u32());
     }
 

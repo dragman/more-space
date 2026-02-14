@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sim Log • More Space</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #070c18;
+        --panel: #0f1528;
+        --text: #e8ecff;
+        --muted: #92a6cb;
+        --accent: #5ed0ff;
+        --accent-2: #f4c97a;
+        --line: rgba(94, 208, 255, 0.28);
+        --shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: radial-gradient(circle at 20% 15%, rgba(94, 208, 255, 0.08), transparent 48%),
+          radial-gradient(circle at 80% 10%, rgba(244, 201, 122, 0.08), transparent 45%),
+          radial-gradient(circle at 40% 75%, rgba(116, 169, 255, 0.1), transparent 50%),
+          var(--bg);
+        color: var(--text);
+        overflow: hidden;
+      }
+      #app {
+        height: 100dvh;
+        width: 100vw;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px 14px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        background: var(--panel);
+        border-radius: 14px;
+        padding: 14px 16px;
+        box-shadow: var(--shadow);
+        flex: 0 0 auto;
+      }
+      h1 {
+        margin: 0 0 6px 0;
+        letter-spacing: 0.04em;
+      }
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      input[type="text"],
+      input[type="number"] {
+        background: #0c1225;
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 7px 9px;
+        border-radius: 10px;
+        min-width: 160px;
+        font-size: 13px;
+      }
+      button {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        border: none;
+        color: #0b111f;
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+        font-size: 13px;
+      }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: none;
+      }
+      button.active {
+        background: linear-gradient(135deg, #f4c97a, #f2976a);
+      }
+      .layout {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 2.8fr 1fr;
+        gap: 12px;
+      }
+      .main-stack {
+        display: grid;
+        grid-template-rows: 2.4fr 1fr;
+        gap: 12px;
+        min-height: 0;
+      }
+      .panel {
+        background: linear-gradient(160deg, rgba(7, 11, 22, 0.92), rgba(12, 17, 31, 0.96));
+        border-radius: 14px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+        min-height: 0;
+        overflow: hidden;
+      }
+      .log {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        height: 100%;
+        overflow: hidden;
+      }
+      .log-list {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding-right: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .log-entry {
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(10, 16, 30, 0.75);
+        padding: 10px 12px;
+        border-radius: 12px;
+      }
+      .log-entry h3 {
+        margin: 0 0 6px 0;
+        font-size: 14px;
+        letter-spacing: 0.04em;
+      }
+      .event {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 4px 0;
+      }
+      .tag {
+        display: inline-block;
+        background: rgba(94, 208, 255, 0.18);
+        color: var(--accent);
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        margin-right: 6px;
+      }
+      .summary {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        height: 100%;
+        overflow: hidden;
+      }
+      .summary-section {
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: rgba(10, 16, 30, 0.7);
+      }
+      .grid-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-height: 260px;
+      }
+      .grid-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .grid-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .grid-controls input {
+        min-width: 0;
+        width: 70px;
+        padding: 5px 7px;
+        font-size: 12px;
+      }
+      .grid-wrap {
+        flex: 1 1 auto;
+        background: rgba(8, 12, 24, 0.9);
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        overflow: hidden;
+      }
+      #gridSvg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #gridSvg text {
+        font-size: 10px;
+        fill: var(--muted);
+        pointer-events: none;
+      }
+      .summary-section h3 {
+        margin: 0 0 8px 0;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .summary-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .mono {
+        font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+        color: var(--text);
+      }
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 12px;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      @media (max-width: 980px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .main-stack {
+          grid-template-rows: 1.4fr 1fr;
+        }
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .controls {
+          width: 100%;
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div>
+          <h1>Sim Log</h1>
+          <p>Headless turns streamed straight from wasm. Keep the UI thin.</p>
+          <div class="status" id="status">Loading wasm…</div>
+        </div>
+        <div class="controls">
+          <input id="seedInput" type="text" placeholder="Seed (u64)" />
+          <button id="initBtn">Init sim</button>
+          <button id="stepBtn" class="secondary">Step</button>
+          <button id="runBtn" class="secondary">Auto</button>
+          <input id="speedInput" type="number" min="100" step="100" value="900" />
+          <button id="clearBtn" class="secondary">Clear log</button>
+          <a href="./index.html">Back to systems</a>
+        </div>
+      </header>
+
+      <div class="layout">
+        <div class="main-stack">
+          <section class="panel grid-panel">
+            <div class="grid-header">
+              <h3>Hex Grid</h3>
+              <div class="grid-controls">
+                <input id="gridRadius" type="number" min="1" max="12" value="6" />
+                <button id="gridBtn" class="secondary">Render</button>
+              </div>
+            </div>
+            <div class="grid-wrap">
+              <svg id="gridSvg"></svg>
+            </div>
+          </section>
+          <section class="panel log">
+            <div class="log-list" id="logList"></div>
+          </section>
+        </div>
+        <section class="panel summary">
+          <div class="summary-section">
+            <h3>Units</h3>
+            <div class="summary-list" id="unitList"></div>
+          </div>
+          <div class="summary-section">
+            <h3>Loot</h3>
+            <div class="summary-list" id="lootList"></div>
+          </div>
+          <div class="summary-section">
+            <h3>Belief Peaks</h3>
+            <div class="summary-list" id="beliefList"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="./sim.ts"></script>
+  </body>
+</html>
