@@ -6,6 +6,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "types:sync": "cargo test -q",
+    "verify": "cargo test -q && npm run typecheck",
+    "dev:full": "npm run verify && npm run wasm && npm run dev",
     "typecheck": "bash -lc 'source ~/.nvm/nvm.sh && nvm use >/dev/null && npx tsc --noEmit'",
     "wasm": "wasm-pack build --target web --out-dir pkg --out-name more_space",
     "build:local": "npm run wasm && npm run build"
