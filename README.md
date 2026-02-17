@@ -35,6 +35,7 @@ npm run wasm && npm run dev
 ```bash
 npm run verify      # cargo test -q + typecheck
 npm run wasm        # rebuild pkg/
+npm run wasm:dev    # debug wasm build (keeps debuginfo)
 npm run dev         # vite dev server
 npm run typecheck   # ts check
 cargo test -q       # rust tests + ts-rs binding sync
@@ -67,3 +68,20 @@ npm run verify
 npm run wasm
 ```
 Then restart `npm run dev`.
+
+## VS Code wasm debugging (Rust source breakpoints)
+1. Install VS Code extension: `WebAssembly DWARF Debugging`.
+2. Build debug wasm:
+```bash
+npm run wasm:dev
+```
+3. Start dev server:
+```bash
+npm run dev
+```
+4. Open the app in Chromium-based browser DevTools from VS Code debug session.
+5. Hard refresh (`Cmd+Shift+R`) after each wasm rebuild.
+
+Notes:
+- Rust source debugging depends on DWARF info in wasm; this repo enables that for `wasm-pack --dev`.
+- Release builds (`npm run wasm`) are still optimized for production and do not include debug-focused settings.

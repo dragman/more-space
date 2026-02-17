@@ -48,6 +48,7 @@ const gridWrap = gridSvg.parentElement as HTMLDivElement;
 const MAX_LOGS = 60;
 const HEX_SIZE = 14;
 const LOOT_BELIEF_RENDER_THRESHOLD = 0.25;
+const GRID_ZOOM_STEP = 1.06;
 type TeamId = number;
 type ViewMode = "global" | TeamId;
 type ColorRGB = { r: number; g: number; b: number };
@@ -373,7 +374,7 @@ function setupGridInteractions(): void {
         (event) => {
             if (event.ctrlKey || event.metaKey) {
                 event.preventDefault();
-                const scale = event.deltaY < 0 ? 1.12 : 0.89;
+                const scale = event.deltaY < 0 ? GRID_ZOOM_STEP : 1 / GRID_ZOOM_STEP;
                 zoomGridAt(event.clientX, event.clientY, scale);
                 return;
             }

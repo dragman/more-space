@@ -8,7 +8,9 @@
     "types:sync": "cargo test -q",
     "verify": "cargo test -q && npm run typecheck",
     "dev:full": "npm run verify && npm run wasm && npm run dev",
+    "dev:debug": "npm run wasm:dev && npm run dev",
     "typecheck": "bash -lc 'source ~/.nvm/nvm.sh && nvm use >/dev/null && npx tsc --noEmit'",
+    "wasm:dev": "wasm-pack build --dev --target web --out-dir pkg --out-name more_space",
     "wasm": "wasm-pack build --target web --out-dir pkg --out-name more_space",
     "build:local": "npm run wasm && npm run build"
   },
