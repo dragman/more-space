@@ -1,11 +1,13 @@
 pub mod body;
 pub mod hazard;
 pub mod naming;
+pub mod protocol;
 pub mod sim;
 pub mod system;
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use protocol::{CommandEnvelope, CommandReply, SimCommand, TeamTurnIntent};
 use sim::{SimConfig, SimState, TurnLog};
 
 pub struct Game {
@@ -16,6 +18,18 @@ pub struct Game {
 impl Game {
     pub fn new(seed: u64) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let config = Self::randomized_config(&mut rng);
+        let sim = SimState::new(&mut rng, config);
+        Self { rng, sim }
+    }
+
+    pub fn new_with_config(seed: u64, config: SimConfig) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let sim = SimState::new(&mut rng, config);
+        Self { rng, sim }
+    }
+
+    fn randomized_config<R: Rng>(rng: &mut R) -> SimConfig {
         let mut config = SimConfig::default();
         config.grid_radius = rng.gen_range(14..=20);
         config.visible_radius = rng.gen_range(3..=5);
@@ -26,8 +40,7 @@ impl Game {
         config.max_loot = rng.gen_range(8..=18);
         config.active_cooldown = rng.gen_range(3..=6);
         config.belief_decay_rate = rng.gen_range(0.03..=0.1);
-        let sim = SimState::new(&mut rng, config);
-        Self { rng, sim }
+        config
     }
 
     pub fn next_f64(&mut self) -> f64 {
@@ -40,6 +53,31 @@ impl Game {
 
     pub fn tick(&mut self) -> TurnLog {
         self.sim.tick(&mut self.rng)
+    }
+
+    pub fn snapshot(&self) -> TurnLog {
+        self.sim.snapshot()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.sim.revision()
+    }
+
+    pub fn submit_team_intent(
+        &mut self,
+        command_id: u64,
+        expected_revision: u64,
+        team_id: u8,
+        intent: TeamTurnIntent,
+    ) -> CommandReply {
+        self.sim.submit_command(
+            &mut self.rng,
+            CommandEnvelope {
+                command_id,
+                expected_revision,
+                command: SimCommand::SubmitTeamIntent { team_id, intent },
+            },
+        )
     }
 }
 

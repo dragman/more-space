@@ -69,6 +69,9 @@
         flex-wrap: wrap;
         justify-content: flex-end;
       }
+      .controls-left {
+        justify-content: flex-start;
+      }
       input[type="text"],
       input[type="number"],
       select {
@@ -176,22 +179,71 @@
       }
       .grid-controls {
         position: absolute;
-        top: 10px;
-        right: 10px;
+        left: 50%;
+        bottom: 10px;
+        transform: translateX(-50%);
         z-index: 6;
         display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        padding: 0;
+        background: transparent;
+        border: none;
+      }
+      .control-tabs {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 4px;
+        padding: 0;
+        border-bottom: none;
+        align-self: flex-start;
+      }
+      .tab-btn {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-bottom: none;
+        box-shadow: none;
+        border-radius: 10px 10px 0 0;
+        padding: 5px 11px 6px 11px;
+      }
+      .tab-btn.active {
+        background: rgba(8, 12, 24, 0.98);
+        border-color: rgba(94, 208, 255, 0.55);
+        color: #dff7ff;
+        position: relative;
+        top: 0;
+        margin-bottom: -1px;
+      }
+      .control-panel {
+        display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 4px;
-        border-radius: 8px;
-        background: rgba(8, 12, 24, 0.72);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 9px 4px 2px 4px;
+        min-height: 44px;
+        width: min(900px, calc(100vw - 56px));
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 0 10px 10px 10px;
+        background: rgba(8, 12, 24, 0.96);
+      }
+      .control-panel[hidden] {
+        display: none;
       }
       .grid-controls input {
         min-width: 0;
         width: 70px;
         padding: 5px 7px;
         font-size: 12px;
+      }
+      .grid-controls select {
+        min-width: 150px;
+      }
+      .turn-btn {
+        background: linear-gradient(135deg, #f4c97a, #f2976a);
+        color: #1a1010;
       }
       .grid-wrap {
         flex: 1 1 auto;
@@ -230,15 +282,19 @@
         overflow: auto;
         padding: 10px;
       }
-      .overlay-log {
-        left: 14px;
-        right: 14px;
-        bottom: 14px;
-        width: auto;
-      }
-      .overlay-summary {
+      .overlay-stack {
+        position: absolute;
         top: 14px;
         right: 14px;
+        z-index: 5;
+        width: min(420px, 42vw);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .overlay-stack .overlay {
+        position: static;
+        width: 100%;
       }
       #gridSvg {
         width: 100%;
@@ -272,6 +328,39 @@
         font-size: 12px;
         color: var(--muted);
       }
+      .init-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: rgba(3, 7, 14, 0.78);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+      .init-modal[hidden] {
+        display: none;
+      }
+      .init-card {
+        width: min(520px, 96vw);
+        background: linear-gradient(160deg, rgba(7, 11, 22, 0.96), rgba(12, 17, 31, 0.98));
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+        padding: 14px;
+      }
+      .init-card h2 {
+        margin: 0 0 6px 0;
+        font-size: 18px;
+      }
+      .init-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .init-row > * {
+        flex: 1 1 auto;
+      }
       a {
         color: var(--accent);
         text-decoration: none;
@@ -285,18 +374,18 @@
           flex-direction: column;
           align-items: flex-start;
         }
-        .controls {
-          width: 100%;
-          justify-content: flex-start;
-        }
         .overlay {
           position: static;
           width: 100%;
           margin-top: 8px;
         }
+        .overlay-stack {
+          position: static;
+          width: 100%;
+          margin-top: 8px;
+        }
         .grid-controls {
-          top: 8px;
-          right: 8px;
+          bottom: 8px;
         }
         .overlay .panel-content {
           max-height: 28dvh;
@@ -309,58 +398,79 @@
       <header>
         <div>
           <h1>Sim Log</h1>
-          <p>Headless turns streamed straight from wasm. Keep the UI thin.</p>
+          <p>Playable turn layer. Intent planning and resolution only.</p>
+          <div class="status" id="playerTeam">Player team: Team 0</div>
           <div class="status" id="status">Loading wasm…</div>
         </div>
-        <div class="controls">
-          <input id="seedInput" type="text" placeholder="Seed (u64)" />
-          <button id="initBtn">Init sim</button>
-          <button id="stepBtn" class="secondary">Step</button>
-          <button id="runBtn" class="secondary">Auto</button>
-          <input id="speedInput" type="number" min="100" step="100" value="900" />
-          <select id="viewMode">
-            <option value="global">View: Global</option>
-          </select>
-          <button id="clearBtn" class="secondary">Clear log</button>
-          <a href="./index.html">Back to systems</a>
-        </div>
+        <a href="./index.html">Back to systems</a>
       </header>
 
       <div class="layout">
         <section class="panel grid-panel">
           <div class="grid-controls">
-            <input id="gridRadius" type="number" min="1" max="12" value="6" />
-            <button id="gridBtn" class="secondary">Render</button>
+            <div class="control-tabs">
+              <button class="tab-btn active" data-control-tab="turn">Turn</button>
+              <button class="tab-btn" data-control-tab="view">View</button>
+              <button class="tab-btn" data-control-tab="session">Session</button>
+            </div>
+            <div class="control-panel" data-control-panel="turn">
+              <button id="stepBtn" class="turn-btn">End turn</button>
+              <button id="holdBtn" class="secondary">Hold selected</button>
+              <button id="runBtn" class="secondary">Auto</button>
+              <input id="speedInput" type="number" min="100" step="100" value="900" />
+            </div>
+            <div class="control-panel" data-control-panel="view" hidden>
+              <select id="viewMode">
+                <option value="global">View: Global</option>
+              </select>
+            </div>
+            <div class="control-panel" data-control-panel="session" hidden>
+              <button id="newSimBtn" class="secondary">New sim</button>
+              <button id="clearBtn" class="secondary">Clear log</button>
+            </div>
           </div>
           <div class="grid-wrap">
             <svg id="gridSvg"></svg>
           </div>
 
-          <details class="overlay overlay-summary">
-            <summary>Intel</summary>
-            <div class="panel-content summary">
-              <div class="summary-section">
-                <h3>Units</h3>
-                <div class="summary-list" id="unitList"></div>
+          <div class="overlay-stack">
+            <details class="overlay" open>
+              <summary>Intel</summary>
+              <div class="panel-content summary">
+                <div class="summary-section">
+                  <h3>Units</h3>
+                  <div class="summary-list" id="unitList"></div>
+                </div>
+                <div class="summary-section">
+                  <h3>Loot</h3>
+                  <div class="summary-list" id="lootList"></div>
+                </div>
+                <div class="summary-section">
+                  <h3>Belief Peaks</h3>
+                  <div class="summary-list" id="beliefList"></div>
+                </div>
               </div>
-              <div class="summary-section">
-                <h3>Loot</h3>
-                <div class="summary-list" id="lootList"></div>
-              </div>
-              <div class="summary-section">
-                <h3>Belief Peaks</h3>
-                <div class="summary-list" id="beliefList"></div>
-              </div>
-            </div>
-          </details>
+            </details>
 
-          <details class="overlay overlay-log">
-            <summary>Event Log</summary>
-            <div class="panel-content log">
-            <div class="log-list" id="logList"></div>
-            </div>
-          </details>
+            <details class="overlay">
+              <summary>Event Log</summary>
+              <div class="panel-content log">
+                <div class="log-list" id="logList"></div>
+              </div>
+            </details>
+          </div>
         </section>
+      </div>
+    </div>
+
+    <div class="init-modal" id="initModal">
+      <div class="init-card">
+        <h2>Start Simulation</h2>
+        <p>Set a seed and start directly in play mode.</p>
+        <div class="init-row">
+          <input id="seedInput" type="text" placeholder="Seed (u64, optional)" />
+          <button id="initBtn">Start sim</button>
+        </div>
       </div>
     </div>
 

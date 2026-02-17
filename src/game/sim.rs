@@ -1,3 +1,7 @@
+use super::protocol::{
+    AcceptedReply, CommandEnvelope, CommandReply, RejectReason, RejectedReply, SimCommand, TeamId,
+    TeamTurnIntent, UnitIntent,
+};
 use crate::hex::{pack_id, CubeCoord, HexGrid};
 use rand::Rng;
 use serde::Serialize;
@@ -7,8 +11,6 @@ use ts_rs::TS;
 const BASE_ENEMY_PRIOR: f64 = 0.04;
 const BASE_LOOT_PRIOR: f64 = 0.08;
 const EPSILON: f64 = 1e-4;
-
-type TeamId = u8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -462,8 +464,13 @@ pub struct SimState {
     teams: Vec<TeamState>,
     knowledge: Vec<TeamKnowledge>,
     turn: u32,
+    revision: u64,
     next_unit_id: u32,
     next_loot_id: u32,
+    pending_intents: HashMap<TeamId, TeamTurnIntent>,
+    executing_intents: Option<HashMap<TeamId, TeamTurnIntent>>,
+    executing_intent_meta: Option<HashMap<u32, IntentMeta>>,
+    command_history: HashMap<u64, CommandReply>,
 }
 
 impl SimState {
@@ -492,11 +499,249 @@ impl SimState {
             teams,
             knowledge,
             turn: 0,
+            revision: 0,
             next_unit_id: 1,
             next_loot_id: 1,
+            pending_intents: HashMap::new(),
+            executing_intents: None,
+            executing_intent_meta: None,
+            command_history: HashMap::new(),
         };
         state.spawn_defaults(rng);
         state
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn snapshot(&self) -> TurnLog {
+        self.build_turn_log(Vec::new())
+    }
+
+    pub fn submit_command<R: Rng>(&mut self, rng: &mut R, envelope: CommandEnvelope) -> CommandReply {
+        if let Some(reply) = self.command_history.get(&envelope.command_id) {
+            return reply.clone();
+        }
+
+        if envelope.expected_revision != self.revision {
+            return CommandReply::Rejected(RejectedReply {
+                current_revision: self.revision,
+                reason: RejectReason::RevisionMismatch,
+                detail: None,
+            });
+        }
+
+        let reply = match envelope.command {
+            SimCommand::SubmitTeamIntent { team_id, intent } => {
+                self.submit_team_intent(rng, team_id, intent)
+            }
+        };
+        self.command_history.insert(envelope.command_id, reply.clone());
+        reply
+    }
+
+    fn submit_team_intent<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        team_id: TeamId,
+        intent: TeamTurnIntent,
+    ) -> CommandReply {
+        if !self.teams.iter().any(|team| team.view.id == team_id) {
+            return CommandReply::Rejected(RejectedReply {
+                current_revision: self.revision,
+                reason: RejectReason::InvalidTeam,
+                detail: None,
+            });
+        }
+        if self.pending_intents.contains_key(&team_id) {
+            return CommandReply::Rejected(RejectedReply {
+                current_revision: self.revision,
+                reason: RejectReason::DuplicateTeamIntent,
+                detail: None,
+            });
+        }
+        if !self.validate_intent(team_id, &intent) {
+            return CommandReply::Rejected(RejectedReply {
+                current_revision: self.revision,
+                reason: RejectReason::InvalidIntent,
+                detail: None,
+            });
+        }
+
+        self.pending_intents.insert(team_id, intent);
+        let mut ai_intent_meta = HashMap::<u32, IntentMeta>::new();
+
+        // Current playtest mode: one human team, AI auto-submits all others.
+        for other_team in self.teams.iter().map(|team| team.view.id) {
+            if !self.pending_intents.contains_key(&other_team) {
+                let (ai_intent, team_meta) = self.synthesize_ai_intent(rng, other_team);
+                self.pending_intents.insert(other_team, ai_intent);
+                ai_intent_meta.extend(team_meta);
+            }
+        }
+
+        let pending_teams: Vec<TeamId> = self
+            .teams
+            .iter()
+            .map(|team| team.view.id)
+            .filter(|id| !self.pending_intents.contains_key(id))
+            .collect();
+
+        if !pending_teams.is_empty() {
+            return CommandReply::Accepted(AcceptedReply {
+                revision: self.revision,
+                pending_teams,
+                resolved_turn: None,
+            });
+        }
+
+        let intents = std::mem::take(&mut self.pending_intents);
+        let mut intent_meta = self.intent_meta_from_submitted(&intents);
+        intent_meta.extend(ai_intent_meta);
+        self.executing_intents = Some(intents);
+        self.executing_intent_meta = Some(intent_meta);
+        let turn_log = self.tick(rng);
+        self.executing_intents = None;
+        self.executing_intent_meta = None;
+        CommandReply::Accepted(AcceptedReply {
+            revision: self.revision,
+            pending_teams: Vec::new(),
+            resolved_turn: Some(turn_log),
+        })
+    }
+
+    fn validate_intent(&self, team_id: TeamId, intent: &TeamTurnIntent) -> bool {
+        let mut seen = HashMap::<u32, ()>::new();
+        for action in &intent.unit_intents {
+            let unit_id = match action {
+                UnitIntent::Hold { unit_id } => *unit_id,
+                UnitIntent::Move { unit_id, to_cell_id } => {
+                    if self.grid.cell_index(*to_cell_id).is_none() {
+                        return false;
+                    }
+                    *unit_id
+                }
+            };
+            if seen.insert(unit_id, ()).is_some() {
+                return false;
+            }
+            let Some(unit) = self.units.iter().find(|u| u.id == unit_id) else {
+                return false;
+            };
+            if unit.team_id != team_id || unit.hp <= 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn synthesize_ai_intent<R: Rng>(
+        &self,
+        rng: &mut R,
+        team_id: TeamId,
+    ) -> (TeamTurnIntent, HashMap<u32, IntentMeta>) {
+        let mut unit_intents = Vec::new();
+        let mut meta = HashMap::new();
+        for unit in self
+            .units
+            .iter()
+            .filter(|u| u.team_id == team_id && u.hp > 0)
+        {
+            let decision = self.ai.choose_movement_decision(rng, unit, self);
+            let intent = self.intent_from_ai_decision(unit, decision.clone());
+            meta.insert(
+                unit.id,
+                IntentMeta {
+                    intent_kind: decision.intent_kind,
+                    reason: decision.reason,
+                    target: decision.target,
+                },
+            );
+            unit_intents.push(intent);
+        }
+        (TeamTurnIntent { unit_intents }, meta)
+    }
+
+    fn intent_from_ai_decision(&self, unit: &Unit, decision: MovementDecision) -> UnitIntent {
+        let move_target = match decision.intent {
+            MovementIntent::Toward(target) => Some(target),
+            MovementIntent::AwayFrom(threat_pos) => {
+                let mut candidates = self.grid.neighbors(&unit.pos);
+                candidates.retain(|coord| !self.is_occupied_by_unit(coord, Some(unit.id)));
+                candidates.sort_by_key(|coord| std::cmp::Reverse(cube_distance(coord, &threat_pos)));
+                candidates.first().copied()
+            }
+            MovementIntent::Hold => None,
+        };
+
+        if let Some(target) = move_target {
+            UnitIntent::Move {
+                unit_id: unit.id,
+                to_cell_id: pack_id(target.x, target.z),
+            }
+        } else {
+            UnitIntent::Hold { unit_id: unit.id }
+        }
+    }
+
+    fn action_for_unit(&self, team_id: TeamId, unit_id: u32) -> Option<UnitIntent> {
+        self.executing_intents
+            .as_ref()?
+            .get(&team_id)?
+            .unit_intents
+            .iter()
+            .find(|action| match action {
+                UnitIntent::Hold { unit_id: id } | UnitIntent::Move { unit_id: id, .. } => {
+                    *id == unit_id
+                }
+            })
+            .cloned()
+    }
+
+    fn intent_meta_for_unit(&self, unit_id: u32) -> Option<IntentMeta> {
+        self.executing_intent_meta
+            .as_ref()?
+            .get(&unit_id)
+            .cloned()
+    }
+
+    fn intent_meta_from_submitted(
+        &self,
+        intents: &HashMap<TeamId, TeamTurnIntent>,
+    ) -> HashMap<u32, IntentMeta> {
+        let mut meta = HashMap::new();
+        for intent in intents.values() {
+            for action in &intent.unit_intents {
+                match action {
+                    UnitIntent::Hold { unit_id } => {
+                        meta.insert(
+                            *unit_id,
+                            IntentMeta {
+                                intent_kind: DecisionIntent::Wander,
+                                reason: "intent hold".to_string(),
+                                target: None,
+                            },
+                        );
+                    }
+                    UnitIntent::Move { unit_id, to_cell_id } => {
+                        let target = self
+                            .grid
+                            .cell_index(*to_cell_id)
+                            .map(|idx| self.grid.cells[idx].coord);
+                        meta.insert(
+                            *unit_id,
+                            IntentMeta {
+                                intent_kind: DecisionIntent::Advance,
+                                reason: "intent move".to_string(),
+                                target,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        meta
     }
 
     fn spawn_defaults<R: Rng>(&mut self, rng: &mut R) {
@@ -700,6 +945,7 @@ impl SimState {
 
     pub fn tick<R: Rng>(&mut self, rng: &mut R) -> TurnLog {
         self.turn += 1;
+        self.revision += 1;
         let mut events = vec![SimEvent::TurnStart { turn: self.turn }];
 
         self.decay_beliefs();
@@ -713,6 +959,10 @@ impl SimState {
         self.resolve_loot(&mut events);
         self.resolve_exits(&mut events);
 
+        self.build_turn_log(events)
+    }
+
+    fn build_turn_log(&self, events: Vec<SimEvent>) -> TurnLog {
         let units = self
             .units
             .iter()
@@ -984,23 +1234,71 @@ impl SimState {
         (enemy_present, loot_present)
     }
 
-    fn move_units<R: Rng>(&mut self, rng: &mut R, events: &mut Vec<SimEvent>) {
+    fn move_units<R: Rng>(&mut self, _rng: &mut R, events: &mut Vec<SimEvent>) {
         let units_snapshot = self.units.clone();
         for unit in units_snapshot {
             if unit.hp <= 0 {
                 continue;
             }
-            let decision = self.ai.choose_movement_decision(rng, &unit, self);
-            let intent = decision.intent;
+            let meta = self.intent_meta_for_unit(unit.id);
+            let (intent, intent_kind, reason, target) =
+                if let Some(action) = self.action_for_unit(unit.team_id, unit.id) {
+                    match action {
+                        UnitIntent::Hold { .. } => (
+                            MovementIntent::Hold,
+                            meta.as_ref()
+                                .map(|m| m.intent_kind)
+                                .unwrap_or(DecisionIntent::Wander),
+                            meta.as_ref()
+                                .map(|m| m.reason.clone())
+                                .unwrap_or_else(|| "intent hold".to_string()),
+                            meta.and_then(|m| m.target),
+                        ),
+                        UnitIntent::Move { to_cell_id, .. } => {
+                            if let Some(target_idx) = self.grid.cell_index(to_cell_id) {
+                                let target = self.grid.cells[target_idx].coord;
+                                (
+                                    MovementIntent::Toward(target),
+                                    meta.as_ref()
+                                        .map(|m| m.intent_kind)
+                                        .unwrap_or(DecisionIntent::Advance),
+                                    meta.as_ref()
+                                        .map(|m| m.reason.clone())
+                                        .unwrap_or_else(|| "intent move".to_string()),
+                                    meta.and_then(|m| m.target).or(Some(target)),
+                                )
+                            } else {
+                                (
+                                    MovementIntent::Hold,
+                                    DecisionIntent::Wander,
+                                    "invalid move target; holding".to_string(),
+                                    None,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    (
+                        MovementIntent::Hold,
+                        DecisionIntent::Wander,
+                        "implicit hold (missing intent)".to_string(),
+                        None,
+                    )
+                };
             events.push(SimEvent::UnitDecision {
                 unit_id: unit.id,
-                intent: decision.intent_kind,
-                reason: decision.reason,
-                target: decision.target.map(|coord| CellRef::from_coord(&coord)),
+                intent: intent_kind,
+                reason,
+                target: target.map(|coord| CellRef::from_coord(&coord)),
             });
             let mut steps = unit.stats.movement_range.max(1);
             let mut current = unit.pos;
             while steps > 0 {
+                if let MovementIntent::Toward(target_pos) = intent {
+                    if current == target_pos {
+                        break;
+                    }
+                }
                 let mut candidates = self.grid.neighbors(&current);
                 if candidates.is_empty() {
                     break;
@@ -1019,10 +1317,6 @@ impl SimState {
                             std::cmp::Reverse(cube_distance(coord, &threat_pos))
                         });
                         candidates[0]
-                    }
-                    MovementIntent::Random => {
-                        let idx = rng.gen_range(0..candidates.len());
-                        candidates[idx]
                     }
                     MovementIntent::Hold => break,
                 };
@@ -1186,12 +1480,19 @@ struct AiProfile {
 enum MovementIntent {
     Toward(CubeCoord),
     AwayFrom(CubeCoord),
-    Random,
     Hold,
 }
 
+#[derive(Clone)]
 struct MovementDecision {
     intent: MovementIntent,
+    intent_kind: DecisionIntent,
+    reason: String,
+    target: Option<CubeCoord>,
+}
+
+#[derive(Clone)]
+struct IntentMeta {
     intent_kind: DecisionIntent,
     reason: String,
     target: Option<CubeCoord>,
@@ -1922,5 +2223,123 @@ mod sim_tests {
         assert_eq!(decision.intent_kind, DecisionIntent::Retreat);
         assert!(matches!(decision.intent, MovementIntent::Toward(_)));
         assert!(decision.reason.contains("weak signals"));
+    }
+
+    #[test]
+    fn submit_command_rejects_revision_mismatch() {
+        let mut rng = ChaCha8Rng::seed_from_u64(77);
+        let mut sim = SimState::new(&mut rng, test_config());
+
+        let reply = sim.submit_command(
+            &mut rng,
+            CommandEnvelope {
+                command_id: 1,
+                expected_revision: 9,
+                command: SimCommand::SubmitTeamIntent {
+                    team_id: 0,
+                    intent: TeamTurnIntent {
+                        unit_intents: vec![],
+                    },
+                },
+            },
+        );
+
+        match reply {
+            CommandReply::Rejected(rej) => {
+                assert_eq!(rej.reason, RejectReason::RevisionMismatch);
+                assert_eq!(rej.current_revision, sim.revision());
+            }
+            other => panic!("expected rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn submit_team_intent_resolves_turn_and_increments_revision() {
+        let mut rng = ChaCha8Rng::seed_from_u64(88);
+        let mut sim = SimState::new(&mut rng, test_config());
+        let starting_turn = sim.turn;
+
+        let reply = sim.submit_command(
+            &mut rng,
+            CommandEnvelope {
+                command_id: 10,
+                expected_revision: 0,
+                command: SimCommand::SubmitTeamIntent {
+                    team_id: 0,
+                    intent: TeamTurnIntent {
+                        unit_intents: vec![],
+                    },
+                },
+            },
+        );
+
+        match reply {
+            CommandReply::Accepted(ok) => {
+                assert_eq!(ok.revision, 1);
+                assert!(ok.pending_teams.is_empty());
+                let log = ok.resolved_turn.expect("turn should resolve");
+                assert_eq!(log.turn, starting_turn + 1);
+            }
+            other => panic!("expected acceptance, got {other:?}"),
+        }
+        assert_eq!(sim.revision(), 1);
+    }
+
+    #[test]
+    fn duplicate_command_id_is_idempotent() {
+        let mut rng = ChaCha8Rng::seed_from_u64(99);
+        let mut sim = SimState::new(&mut rng, test_config());
+
+        let envelope = CommandEnvelope {
+            command_id: 42,
+            expected_revision: 0,
+            command: SimCommand::SubmitTeamIntent {
+                team_id: 0,
+                intent: TeamTurnIntent {
+                    unit_intents: vec![],
+                },
+            },
+        };
+
+        let first = sim.submit_command(&mut rng, envelope.clone());
+        let second = sim.submit_command(&mut rng, envelope);
+
+        let first_json = serde_json::to_string(&first).expect("serialize first reply");
+        let second_json = serde_json::to_string(&second).expect("serialize second reply");
+        assert_eq!(first_json, second_json);
+        assert_eq!(sim.revision(), 1);
+    }
+
+    #[test]
+    fn submit_team_move_intent_moves_unit() {
+        let mut sim = make_test_state();
+        let mut rng = ChaCha8Rng::seed_from_u64(202);
+        let start = sim.units.iter().find(|u| u.id == 1).expect("unit 1").pos;
+        let to = CubeCoord::new(start.x + 1, start.y - 1, start.z);
+        let to_cell_id = pack_id(to.x, to.z);
+
+        let reply = sim.submit_command(
+            &mut rng,
+            CommandEnvelope {
+                command_id: 77,
+                expected_revision: 0,
+                command: SimCommand::SubmitTeamIntent {
+                    team_id: 0,
+                    intent: TeamTurnIntent {
+                        unit_intents: vec![UnitIntent::Move {
+                            unit_id: 1,
+                            to_cell_id,
+                        }],
+                    },
+                },
+            },
+        );
+
+        let CommandReply::Accepted(ok) = reply else {
+            panic!("expected accepted reply");
+        };
+        let log = ok.resolved_turn.expect("turn should resolve");
+        let moved = log.units.iter().find(|u| u.id == 1).expect("unit in log");
+        assert_eq!(moved.pos.id, to_cell_id.to_string());
     }
 }

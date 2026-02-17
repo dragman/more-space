@@ -1,4 +1,4 @@
-import initWasm, { hex_window, init_game, tick } from "../pkg/more_space.js";
+import initWasm, { hex_window, init_game, revision, snapshot, submit_team_intent } from "../pkg/more_space.js";
 import type { SimEvent } from "./bindings/SimEvent";
 import type { LootView } from "./bindings/LootView";
 import type { TeamBeliefCell } from "./bindings/TeamBeliefCell";
@@ -8,6 +8,9 @@ import type { TurnLog } from "./bindings/TurnLog";
 import type { UnitView } from "./bindings/UnitView";
 import type { WeaponType } from "./bindings/WeaponType";
 import type { ExitPointView } from "./bindings/ExitPointView";
+import type { CommandReply } from "./bindings/CommandReply";
+import type { TeamTurnIntent } from "./bindings/TeamTurnIntent";
+import type { UnitIntent } from "./bindings/UnitIntent";
 
 type HexCell = {
     id: string;
@@ -30,6 +33,8 @@ type HexGrid = {
 
 const seedInput = document.getElementById("seedInput") as HTMLInputElement;
 const initBtn = document.getElementById("initBtn") as HTMLButtonElement;
+const newSimBtn = document.getElementById("newSimBtn") as HTMLButtonElement;
+const initModal = document.getElementById("initModal") as HTMLDivElement;
 const stepBtn = document.getElementById("stepBtn") as HTMLButtonElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
 const clearBtn = document.getElementById("clearBtn") as HTMLButtonElement;
@@ -40,18 +45,21 @@ const unitList = document.getElementById("unitList") as HTMLDivElement;
 const lootList = document.getElementById("lootList") as HTMLDivElement;
 const beliefList = document.getElementById("beliefList") as HTMLDivElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
-const gridRadiusInput = document.getElementById("gridRadius") as HTMLInputElement;
-const gridBtn = document.getElementById("gridBtn") as HTMLButtonElement;
+const playerTeamEl = document.getElementById("playerTeam") as HTMLDivElement;
+const holdBtn = document.getElementById("holdBtn") as HTMLButtonElement;
 const gridSvg = document.getElementById("gridSvg") as unknown as SVGSVGElement;
 const gridWrap = gridSvg.parentElement as HTMLDivElement;
+const controlTabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-control-tab]"));
+const controlPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-control-panel]"));
 
 const MAX_LOGS = 60;
 const HEX_SIZE = 14;
 const LOOT_BELIEF_RENDER_THRESHOLD = 0.25;
 const GRID_ZOOM_STEP = 1.06;
+const GRID_DRAG_THRESHOLD_PX = 6;
 type TeamId = number;
 type ViewMode = "global" | TeamId;
-type ColorRGB = { r: number; g: number; b: number };
+
 let running = false;
 let timer: number | null = null;
 let wasmReady = false;
@@ -76,6 +84,13 @@ let gridPointer: { active: boolean; pointerId: number | null; startX: number; st
     startY: 0,
 };
 let gridInteractionsBound = false;
+let nextCommandId = 1n;
+let selectedUnitId: number | null = null;
+let hoveredCellId: string | null = null;
+let plannedMoves = new Map<number, number>();
+let explicitHolds = new Set<number>();
+let playerTeamId = 0;
+let simInitialized = false;
 
 function randomSeed(): bigint {
     const upper = BigInt(Number.MAX_SAFE_INTEGER);
@@ -95,6 +110,28 @@ function parseSeed(): bigint {
 
 function updateStatus(text: string): void {
     statusEl.textContent = text;
+}
+
+function setInitModalOpen(open: boolean): void {
+    initModal.hidden = !open;
+    if (open) {
+        setRunning(false);
+        window.setTimeout(() => seedInput.focus(), 0);
+    }
+}
+
+function setControlTab(tab: "turn" | "view" | "session"): void {
+    for (const btn of controlTabButtons) {
+        btn.classList.toggle("active", btn.dataset.controlTab === tab);
+    }
+    for (const panel of controlPanels) {
+        panel.hidden = panel.dataset.controlPanel !== tab;
+    }
+}
+
+function updatePlayerTeamLabel(): void {
+    const team = latestTeams.find((t) => t.id === playerTeamId);
+    playerTeamEl.textContent = `Player team: ${team ? `${team.name} (#${team.id})` : `Team ${playerTeamId}`}`;
 }
 
 function setRunning(next: boolean): void {
@@ -128,9 +165,12 @@ function clearLog(): void {
     latestExits = [];
     latestGridRadius = null;
     gridCellMap = null;
-    gridRadiusInput.disabled = false;
-    gridBtn.disabled = false;
+    selectedUnitId = null;
+    hoveredCellId = null;
+    plannedMoves.clear();
+    explicitHolds.clear();
     updateViewOptions();
+    updatePlayerTeamLabel();
 }
 
 function teamById(teamId: TeamId): TeamView | null {
@@ -151,6 +191,11 @@ function teamBadge(teamId: TeamId): string {
     return name.length > 0 ? name[0].toUpperCase() : "?";
 }
 
+function unitMaxHp(archetype: UnitView["archetype"]): number {
+    if (archetype === "dreadnaught") return 32;
+    return 24;
+}
+
 function viewOptionValue(teamId: TeamId): string {
     return `team:${teamId}`;
 }
@@ -168,10 +213,10 @@ function updateViewOptions(): void {
         opt.textContent = `View: ${team.name}`;
         viewModeSelect.appendChild(opt);
     }
-    if (active === "global") {
-        viewModeSelect.value = "global";
-    } else if (latestTeams.some((team) => team.id === active)) {
+    if (active !== "global" && latestTeams.some((team) => team.id === active)) {
         viewModeSelect.value = viewOptionValue(active);
+    } else if (latestTeams.some((team) => team.id === playerTeamId)) {
+        viewModeSelect.value = viewOptionValue(playerTeamId);
     } else {
         viewModeSelect.value = "global";
     }
@@ -235,6 +280,126 @@ function renderPerspective(): void {
     renderLoot(displayedLoot);
     renderBeliefs(latestBeliefs, view);
     renderGrid();
+}
+
+function playerUnits(): UnitView[] {
+    return latestUnits.filter((u) => u.team_id === playerTeamId && u.hp > 0);
+}
+
+function selectedPlayerUnit(): UnitView | null {
+    if (selectedUnitId == null) return null;
+    return latestUnits.find((u) => u.id === selectedUnitId && u.team_id === playerTeamId && u.hp > 0) ?? null;
+}
+
+function validMoveTargetsFor(unit: UnitView): Set<string> {
+    const occupied = new Set(
+        latestUnits
+            .filter((u) => u.hp > 0 && u.id !== unit.id)
+            .map((u) => u.pos.id),
+    );
+    const targets = new Set<string>();
+    if (!gridCellMap) return targets;
+    for (const [cellId, cell] of gridCellMap.entries()) {
+        if (occupied.has(cellId)) continue;
+        const d = cubeDistanceFromAxial(unit.pos, { q: cell.q, r: cell.r });
+        if (d >= 1 && d <= unit.movement_range) {
+            targets.add(cellId);
+        }
+    }
+    return targets;
+}
+
+function cellContentsSummary(cellId: string): string {
+    const coord = gridCellMap?.get(cellId);
+    const where = coord ? `(${coord.q},${coord.r})` : `cell ${cellId}`;
+    const aliveUnits = latestUnits.filter((u) => u.hp > 0 && u.pos.id === cellId);
+    const unclaimedLoot = latestLoot.filter((l) => !l.claimed && l.pos.id === cellId);
+    const exits = latestExits.filter((e) => e.pos.id === cellId);
+
+    const unitPart =
+        aliveUnits.length > 0
+            ? `units: ${aliveUnits.map((u) => `#${u.id} ${teamName(u.team_id)}`).join(", ")}`
+            : "units: none";
+    const lootPart =
+        unclaimedLoot.length > 0
+            ? `loot: ${unclaimedLoot.map((l) => `#${l.id}(+${l.value})`).join(", ")}`
+            : "loot: none";
+    const exitPart = exits.length > 0 ? `exit: #${exits.map((e) => e.id).join(",#")}` : "exit: none";
+    return `${where} | ${unitPart} | ${lootPart} | ${exitPart}`;
+}
+
+function buildPlayerTurnIntent(): TeamTurnIntent {
+    const unit_intents: UnitIntent[] = playerUnits().map((unit) => {
+        const toCellId = plannedMoves.get(unit.id);
+        if (toCellId != null) {
+            return { type: "move", unit_id: unit.id, to_cell_id: toCellId };
+        }
+        if (explicitHolds.has(unit.id)) {
+            return { type: "hold", unit_id: unit.id };
+        }
+        return { type: "hold", unit_id: unit.id };
+    });
+    return { unit_intents };
+}
+
+function selectUnit(unitId: number): void {
+    selectedUnitId = unitId;
+    const unit = latestUnits.find((u) => u.id === unitId);
+    const cellInfo = unit ? cellContentsSummary(unit.pos.id) : `unit ${unitId}`;
+    updateStatus(
+        `Selected unit ${unitId}. ${cellInfo}. Click a highlighted hex to confirm move, or use Hold selected.`,
+    );
+    renderPerspective();
+}
+
+function selectUnitIfOwned(unitId: number): void {
+    const unit = latestUnits.find((u) => u.id === unitId && u.hp > 0);
+    if (!unit) {
+        updateStatus(`Unit ${unitId} is unavailable.`);
+        return;
+    }
+    if (unit.team_id !== playerTeamId) {
+        updateStatus(`Unit ${unitId} belongs to ${teamName(unit.team_id)}. You control ${teamName(playerTeamId)}.`);
+        return;
+    }
+    selectUnit(unitId);
+}
+
+function planMoveForSelectedUnit(cellId: string): void {
+    const selected = selectedPlayerUnit();
+    const cellInfo = cellContentsSummary(cellId);
+    if (!selected) {
+        updateStatus(`Clicked ${cellInfo}. Select one of your units first.`);
+        return;
+    }
+    const validTargets = validMoveTargetsFor(selected);
+    if (!validTargets.has(cellId)) {
+        updateStatus(`Clicked ${cellInfo}. Outside movement range or blocked for unit ${selected.id}.`);
+        return;
+    }
+    const asNumber = Number(cellId);
+    if (!Number.isFinite(asNumber)) {
+        updateStatus(`Invalid cell id ${cellId}.`);
+        return;
+    }
+    plannedMoves.set(selected.id, asNumber);
+    explicitHolds.delete(selected.id);
+    updateStatus(`Planned move for unit ${selected.id} -> ${cellInfo}.`);
+    selectedUnitId = null;
+    renderPerspective();
+}
+
+function setHoldForSelectedUnit(): void {
+    const selected = selectedPlayerUnit();
+    if (!selected) {
+        updateStatus("Select one of your units from the map first.");
+        return;
+    }
+    plannedMoves.delete(selected.id);
+    explicitHolds.add(selected.id);
+    selectedUnitId = null;
+    updateStatus(`Set unit ${selected.id} to hold this turn.`);
+    renderPerspective();
 }
 
 function axialToPixel(q: number, r: number, size: number): { x: number; y: number } {
@@ -337,12 +502,23 @@ function setupGridInteractions(): void {
         gridPointer.pointerId = event.pointerId;
         gridPointer.startX = event.clientX;
         gridPointer.startY = event.clientY;
-        gridSvg.style.cursor = "grabbing";
-        gridSvg.setPointerCapture(event.pointerId);
+        gridSvg.style.cursor = "grab";
     });
 
     gridSvg.addEventListener("pointermove", (event) => {
         if (!gridPointer.active || gridPointer.pointerId !== event.pointerId) return;
+        if (!gridSvg.hasPointerCapture(event.pointerId)) {
+            const dxStart = event.clientX - gridPointer.startX;
+            const dyStart = event.clientY - gridPointer.startY;
+            if (Math.hypot(dxStart, dyStart) < GRID_DRAG_THRESHOLD_PX) {
+                return;
+            }
+            gridSvg.style.cursor = "grabbing";
+            gridSvg.setPointerCapture(event.pointerId);
+            gridPointer.startX = event.clientX;
+            gridPointer.startY = event.clientY;
+            return;
+        }
         const rect = gridSvg.getBoundingClientRect();
         const view = currentSvgViewBox();
         if (!view || rect.width <= 0 || rect.height <= 0) return;
@@ -394,8 +570,7 @@ function setupGridInteractions(): void {
 
 function renderGrid(): void {
     if (!wasmReady) return;
-    const radiusInput = parseInt(gridRadiusInput.value, 10) || 6;
-    const radius = latestGridRadius ?? Math.max(1, Math.min(12, radiusInput));
+    const radius = latestGridRadius ?? 6;
     const json = hex_window(0, 0, radius);
     const grid = JSON.parse(json) as HexGrid;
     gridCellMap = new Map(
@@ -422,6 +597,8 @@ function renderGrid(): void {
     applyGridCamera();
 
     const svgNs = "http://www.w3.org/2000/svg";
+    const selected = selectedPlayerUnit();
+    const validTargets = selected ? validMoveTargetsFor(selected) : new Set<string>();
     for (const pos of positions) {
         const belief = beliefMap?.get(pos.cell.id);
         const lootBelief = belief?.loot ?? 0;
@@ -431,9 +608,90 @@ function renderGrid(): void {
         const poly = document.createElementNS(svgNs, "polygon");
         poly.setAttribute("points", hexPoints(pos.x, pos.y, HEX_SIZE));
         poly.setAttribute("fill", fill);
-        poly.setAttribute("stroke", "rgba(94, 208, 255, 0.35)");
-        poly.setAttribute("stroke-width", "1");
+        const isValidTarget = validTargets.has(pos.cell.id);
+        const isHovered = hoveredCellId === pos.cell.id;
+        poly.setAttribute(
+            "stroke",
+            isHovered
+                ? "rgba(232, 236, 255, 0.95)"
+                : isValidTarget
+                  ? "rgba(244, 201, 122, 0.95)"
+                  : "rgba(94, 208, 255, 0.35)",
+        );
+        poly.setAttribute("stroke-width", isHovered ? "2.2" : isValidTarget ? "1.9" : "1");
+        poly.style.cursor = "pointer";
+        poly.addEventListener("mouseenter", () => {
+            if (hoveredCellId === pos.cell.id) return;
+            hoveredCellId = pos.cell.id;
+            renderGrid();
+        });
+        poly.addEventListener("mouseleave", () => {
+            if (hoveredCellId !== pos.cell.id) return;
+            hoveredCellId = null;
+            renderGrid();
+        });
+        poly.addEventListener("click", () => {
+            const clickedPlayerUnit = latestUnits.find(
+                (u) => u.team_id === playerTeamId && u.hp > 0 && u.pos.id === pos.cell.id,
+            );
+            if (clickedPlayerUnit) {
+                selectUnitIfOwned(clickedPlayerUnit.id);
+                return;
+            }
+            planMoveForSelectedUnit(pos.cell.id);
+        });
         gridSvg.appendChild(poly);
+    }
+
+    const plannedCells = new Set<number>([...plannedMoves.values()]);
+    for (const plannedCell of plannedCells) {
+        const coord = gridCellMap?.get(plannedCell.toString());
+        if (!coord) continue;
+        const { x, y } = axialToPixel(coord.q, coord.r, HEX_SIZE);
+        const marker = document.createElementNS(svgNs, "circle");
+        marker.setAttribute("cx", x.toString());
+        marker.setAttribute("cy", y.toString());
+        marker.setAttribute("r", (HEX_SIZE * 0.18).toString());
+        marker.setAttribute("fill", "rgba(94, 208, 255, 0.95)");
+        marker.setAttribute("stroke", "rgba(6, 26, 39, 0.95)");
+        marker.setAttribute("stroke-width", "1.2");
+        marker.style.pointerEvents = "none";
+        gridSvg.appendChild(marker);
+    }
+
+    // Planned move arrows.
+    for (const [unitId, toCellId] of plannedMoves.entries()) {
+        const unit = latestUnits.find((u) => u.id === unitId);
+        const toCoord = gridCellMap?.get(toCellId.toString());
+        if (!unit || !toCoord) continue;
+        const from = axialToPixel(unit.pos.q, unit.pos.r, HEX_SIZE);
+        const to = axialToPixel(toCoord.q, toCoord.r, HEX_SIZE);
+        const line = document.createElementNS(svgNs, "line");
+        line.setAttribute("x1", from.x.toString());
+        line.setAttribute("y1", from.y.toString());
+        line.setAttribute("x2", to.x.toString());
+        line.setAttribute("y2", to.y.toString());
+        line.setAttribute("stroke", "rgba(244, 201, 122, 0.95)");
+        line.setAttribute("stroke-width", "2.2");
+        line.setAttribute("stroke-dasharray", "5 3");
+        line.style.pointerEvents = "none";
+        gridSvg.appendChild(line);
+
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
+        const tipX = to.x;
+        const tipY = to.y;
+        const leftX = tipX - 7 * Math.cos(angle - Math.PI / 7);
+        const leftY = tipY - 7 * Math.sin(angle - Math.PI / 7);
+        const rightX = tipX - 7 * Math.cos(angle + Math.PI / 7);
+        const rightY = tipY - 7 * Math.sin(angle + Math.PI / 7);
+        const head = document.createElementNS(svgNs, "polygon");
+        head.setAttribute(
+            "points",
+            `${tipX.toFixed(2)},${tipY.toFixed(2)} ${leftX.toFixed(2)},${leftY.toFixed(2)} ${rightX.toFixed(2)},${rightY.toFixed(2)}`,
+        );
+        head.setAttribute("fill", "rgba(244, 201, 122, 0.95)");
+        head.style.pointerEvents = "none";
+        gridSvg.appendChild(head);
     }
 
     for (const loot of displayedLoot.filter((node) => !node.claimed)) {
@@ -486,12 +744,45 @@ function renderGrid(): void {
         const fill = dead ? "rgba(95, 103, 118, 0.45)" : "rgba(10, 16, 30, 0.75)";
         const strokeWidth = dead ? "1.6" : "2";
 
+        const hpMax = Math.max(1, unitMaxHp(unit.archetype));
+        const hpRatio = Math.max(0, Math.min(1, unit.hp / hpMax));
+        const hpBarWidth = HEX_SIZE * 0.92;
+        const hpBarHeight = 2.8;
+        const hpBarX = x - hpBarWidth / 2;
+        const hpBarY = y - HEX_SIZE * 0.78;
+
+        const hpBg = document.createElementNS(svgNs, "rect");
+        hpBg.setAttribute("x", hpBarX.toFixed(2));
+        hpBg.setAttribute("y", hpBarY.toFixed(2));
+        hpBg.setAttribute("width", hpBarWidth.toFixed(2));
+        hpBg.setAttribute("height", hpBarHeight.toFixed(2));
+        hpBg.setAttribute("rx", "1.1");
+        hpBg.setAttribute("fill", "rgba(0, 0, 0, 0.52)");
+        hpBg.setAttribute("stroke", "rgba(232, 236, 255, 0.32)");
+        hpBg.setAttribute("stroke-width", "0.4");
+        hpBg.style.pointerEvents = "none";
+        gridSvg.appendChild(hpBg);
+
+        const hpFg = document.createElementNS(svgNs, "rect");
+        hpFg.setAttribute("x", hpBarX.toFixed(2));
+        hpFg.setAttribute("y", hpBarY.toFixed(2));
+        hpFg.setAttribute("width", (hpBarWidth * hpRatio).toFixed(2));
+        hpFg.setAttribute("height", hpBarHeight.toFixed(2));
+        hpFg.setAttribute("rx", "1.1");
+        hpFg.setAttribute(
+            "fill",
+            hpRatio > 0.66 ? "rgba(129, 236, 162, 0.95)" : hpRatio > 0.33 ? "rgba(244, 201, 122, 0.95)" : "rgba(242, 99, 99, 0.95)",
+        );
+        hpFg.style.pointerEvents = "none";
+        gridSvg.appendChild(hpFg);
+
         if (unit.archetype === "scout") {
             const tri = document.createElementNS(svgNs, "polygon");
             tri.setAttribute("points", regularPolygonPoints(x, y, HEX_SIZE * 0.45, 3));
             tri.setAttribute("fill", fill);
             tri.setAttribute("stroke", color);
             tri.setAttribute("stroke-width", strokeWidth);
+            tri.style.pointerEvents = "none";
             gridSvg.appendChild(tri);
         } else {
             const box = document.createElementNS(svgNs, "rect");
@@ -504,6 +795,7 @@ function renderGrid(): void {
             box.setAttribute("fill", fill);
             box.setAttribute("stroke", color);
             box.setAttribute("stroke-width", strokeWidth);
+            box.style.pointerEvents = "none";
             gridSvg.appendChild(box);
         }
 
@@ -514,7 +806,29 @@ function renderGrid(): void {
         label.setAttribute("dominant-baseline", "middle");
         label.setAttribute("fill", dead ? "#c5c9d1" : "#e8ecff");
         label.textContent = `${teamBadge(unit.team_id)}${unit.id}`;
+        if (selectedUnitId === unit.id) {
+            label.setAttribute("font-weight", "700");
+            label.setAttribute("fill", "#f4c97a");
+        }
+        if (unit.team_id === playerTeamId && unit.hp > 0) {
+            label.style.pointerEvents = "none";
+        } else {
+            label.style.pointerEvents = "none";
+        }
         gridSvg.appendChild(label);
+
+        if (selectedUnitId === unit.id) {
+            const rangeRing = document.createElementNS(svgNs, "circle");
+            rangeRing.setAttribute("cx", x.toString());
+            rangeRing.setAttribute("cy", y.toString());
+            rangeRing.setAttribute("r", (HEX_SIZE * unit.movement_range + HEX_SIZE * 0.58).toString());
+            rangeRing.setAttribute("fill", "none");
+            rangeRing.setAttribute("stroke", "rgba(244, 201, 122, 0.55)");
+            rangeRing.setAttribute("stroke-width", "1.4");
+            rangeRing.setAttribute("stroke-dasharray", "6 5");
+            rangeRing.style.pointerEvents = "none";
+            gridSvg.appendChild(rangeRing);
+        }
     }
 }
 
@@ -565,10 +879,35 @@ function initSim(): void {
     if (!wasmReady) return;
     const seed = parseSeed();
     init_game(seed);
+    nextCommandId = 1n;
+    selectedUnitId = null;
+    plannedMoves.clear();
+    explicitHolds.clear();
     clearLog();
+    const payload = snapshot();
+    if (payload.startsWith("{")) {
+        const log = JSON.parse(payload) as TurnLog;
+        latestUnits = log.units ?? [];
+        latestLoot = log.loot ?? [];
+        latestBeliefs = log.beliefs ?? [];
+        latestTeams = log.teams ?? [];
+        if (latestTeams.length > 0) {
+            playerTeamId = latestTeams[0].id;
+        }
+        latestExits = log.exits ?? [];
+        latestGridRadius = typeof log.grid_radius === "number" ? log.grid_radius : null;
+    }
     updateViewOptions();
+    updatePlayerTeamLabel();
+    simInitialized = true;
+    setInitModalOpen(false);
+    stepBtn.disabled = false;
+    runBtn.disabled = false;
+    clearBtn.disabled = false;
+    holdBtn.disabled = false;
+    viewModeSelect.disabled = false;
     renderPerspective();
-    updateStatus(`Initialized with seed ${seed.toString()}`);
+    updateStatus(`Initialized with seed ${seed.toString()}. Plan turn 1 now.`);
 }
 
 function describeEvent(event: SimEvent): string {
@@ -634,9 +973,14 @@ function renderUnits(units: UnitView[]): void {
     }
     for (const unit of units) {
         const row = document.createElement("div");
+        const plannedTo = plannedMoves.get(unit.id);
+        const plannedHold = explicitHolds.has(unit.id);
         row.innerHTML = `#${unit.id} <span class="mono">${teamName(unit.team_id)}</span> <span class="mono">${unit.archetype}</span> HP ${unit.hp} @ (${unit.pos.q},${unit.pos.r}) · ${unit.weapon_type} r${unit.attack_range} d${unit.attack_damage} · move ${unit.movement_range} · inv ${unit.inventory_used}/${unit.inventory_slots}${
             unit.has_active_scan ? " · scan" : ""
-        }${unit.hp <= 0 ? " · destroyed" : ""}`;
+        }${unit.hp <= 0 ? " · destroyed" : ""}${plannedTo ? ` · planned→${plannedTo}` : ""}${plannedHold ? " · planned hold" : ""}`;
+        if (unit.id === selectedUnitId) {
+            row.style.color = "#f4c97a";
+        }
         unitList.appendChild(row);
     }
 }
@@ -732,43 +1076,53 @@ function renderBeliefs(beliefs: TeamBeliefView[], view: ViewMode): void {
 }
 
 function stepSim(): void {
-    if (!wasmReady) return;
+    if (!wasmReady || !simInitialized) return;
     try {
-        const payload = tick();
+        const expectedRevision = revision();
+        const intent = buildPlayerTurnIntent();
+        const payload = submit_team_intent(
+            nextCommandId,
+            expectedRevision,
+            playerTeamId,
+            JSON.stringify(intent),
+        );
+        nextCommandId += 1n;
         if (!payload.startsWith("{")) {
-            const numericTurn = Number(payload);
-            if (Number.isFinite(numericTurn)) {
-                updateStatus("Tick returned a numeric turn. Rebuild wasm to get JSON logs.");
-                const log = {
-                    turn: numericTurn,
-                    events: [{ type: "turn_start", turn: numericTurn } as SimEvent],
-                    units: [],
-                    loot: [],
-                    beliefs: [],
-                } as TurnLog;
-                renderLog(log);
-                latestUnits = [];
-                latestLoot = [];
-                displayedLoot = [];
-                latestBeliefs = [];
-                latestTeams = [];
-                teamOptionsLocked = false;
-                latestAttacks = [];
-                latestExits = [];
-                updateViewOptions();
-                renderPerspective();
-                return;
-            }
-            updateStatus(`Tick error: ${payload}`);
+            updateStatus(`Command error: ${payload}`);
             return;
         }
-        const log = JSON.parse(payload) as TurnLog;
+        const reply = JSON.parse(payload) as CommandReply;
+        if (reply.status === "rejected") {
+            updateStatus(
+                `Command rejected (${reply.reason}), local rev=${reply.current_revision}.${reply.detail ? ` detail: ${reply.detail}` : ""}`,
+            );
+            return;
+        }
+
+        if (reply.pending_teams.length > 0 || !reply.resolved_turn) {
+            updateStatus(
+                `Accepted at rev ${reply.revision}; waiting on ${reply.pending_teams.length} teams.`,
+            );
+            return;
+        }
+
+        const log = reply.resolved_turn;
+        for (const action of intent.unit_intents) {
+            if (action.type === "move") {
+                plannedMoves.delete(action.unit_id);
+                explicitHolds.delete(action.unit_id);
+            } else {
+                explicitHolds.delete(action.unit_id);
+            }
+        }
+        selectedUnitId = null;
         latestUnits = log.units ?? [];
         latestLoot = log.loot ?? [];
         latestBeliefs = log.beliefs ?? [];
         if (!teamOptionsLocked && (log.teams?.length ?? 0) > 0) {
             latestTeams = log.teams;
             updateViewOptions();
+            updatePlayerTeamLabel();
             teamOptionsLocked = true;
         }
         latestExits = log.exits ?? [];
@@ -780,20 +1134,12 @@ function stepSim(): void {
                 weaponType: event.weapon_type,
                 hit: event.hit,
             }));
-        if (typeof log.grid_radius === "number") {
-            latestGridRadius = log.grid_radius;
-            gridRadiusInput.value = log.grid_radius.toString();
-            gridRadiusInput.disabled = true;
-            gridBtn.disabled = true;
-        } else {
-            latestGridRadius = null;
-            gridRadiusInput.disabled = false;
-            gridBtn.disabled = false;
-        }
+        latestGridRadius = typeof log.grid_radius === "number" ? log.grid_radius : null;
         renderLog(log);
         renderPerspective();
+        updateStatus(`Turn ${log.turn} resolved at revision ${reply.revision}.`);
     } catch (err) {
-        updateStatus(`Tick error: ${(err as Error).message}`);
+        updateStatus(`Command error: ${(err as Error).message}`);
         setRunning(false);
     }
 }
@@ -801,24 +1147,25 @@ function stepSim(): void {
 async function boot(): Promise<void> {
     await initWasm();
     wasmReady = true;
-    updateStatus("Wasm ready.");
+    updateStatus("Wasm ready. Start a simulation.");
     initBtn.disabled = false;
-    stepBtn.disabled = false;
-    runBtn.disabled = false;
-    clearBtn.disabled = false;
+    newSimBtn.disabled = false;
     setupGridInteractions();
     updateViewOptions();
+    updatePlayerTeamLabel();
     renderPerspective();
+    setInitModalOpen(true);
 }
 
 initBtn.addEventListener("click", () => initSim());
+newSimBtn.addEventListener("click", () => setInitModalOpen(true));
 stepBtn.addEventListener("click", () => stepSim());
 runBtn.addEventListener("click", () => setRunning(!running));
 clearBtn.addEventListener("click", () => {
     clearLog();
     renderPerspective();
 });
-gridBtn.addEventListener("click", () => renderGrid());
+holdBtn.addEventListener("click", () => setHoldForSelectedUnit());
 viewModeSelect.addEventListener("change", () => renderPerspective());
 speedInput.addEventListener("change", () => {
     if (running) {
@@ -826,11 +1173,23 @@ speedInput.addEventListener("change", () => {
         setRunning(true);
     }
 });
+for (const btn of controlTabButtons) {
+    btn.addEventListener("click", () => {
+        const tab = btn.dataset.controlTab;
+        if (tab === "turn" || tab === "view" || tab === "session") {
+            setControlTab(tab);
+        }
+    });
+}
+setControlTab("turn");
 
 initBtn.disabled = true;
+newSimBtn.disabled = true;
 stepBtn.disabled = true;
 runBtn.disabled = true;
 clearBtn.disabled = true;
+holdBtn.disabled = true;
+viewModeSelect.disabled = true;
 
 boot().catch((err) => {
     updateStatus(`Failed to init wasm: ${(err as Error).message}`);
