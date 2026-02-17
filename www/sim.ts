@@ -55,6 +55,8 @@ const controlPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-c
 const MAX_LOGS = 60;
 const HEX_SIZE = 14;
 const LOOT_BELIEF_RENDER_THRESHOLD = 0.25;
+const BASE_LOOT_PRIOR = 0.08;
+const BASE_ENEMY_PRIOR = 0.04;
 const GRID_ZOOM_STEP = 1.06;
 const GRID_DRAG_THRESHOLD_PX = 6;
 type TeamId = number;
@@ -91,6 +93,10 @@ let plannedMoves = new Map<number, number>();
 let explicitHolds = new Set<number>();
 let playerTeamId = 0;
 let simInitialized = false;
+let resolvingTurn = false;
+let playbackMotion = new Map<number, { q: number; r: number }>();
+let deathMarkers: Array<{ q: number; r: number; expiresAt: number }> = [];
+let deathMarkerFrame: number | null = null;
 
 function randomSeed(): bigint {
     const upper = BigInt(Number.MAX_SAFE_INTEGER);
@@ -144,7 +150,9 @@ function setRunning(next: boolean): void {
     }
     if (running) {
         const speed = parseInt(speedInput.value, 10) || 900;
-        timer = window.setInterval(() => stepSim(), Math.max(200, speed));
+        timer = window.setInterval(() => {
+            void stepSim();
+        }, Math.max(200, speed));
     }
 }
 
@@ -280,10 +288,41 @@ function renderPerspective(): void {
     renderLoot(displayedLoot);
     renderBeliefs(latestBeliefs, view);
     renderGrid();
+    updateEndTurnReadyState();
 }
 
 function playerUnits(): UnitView[] {
     return latestUnits.filter((u) => u.team_id === playerTeamId && u.hp > 0);
+}
+
+function playerUnitsMissingOrders(): UnitView[] {
+    return playerUnits()
+        .filter((u) => !plannedMoves.has(u.id) && !explicitHolds.has(u.id))
+        .sort((a, b) => a.id - b.id);
+}
+
+function focusUnitInGrid(unit: UnitView): void {
+    if (!gridBaseView) return;
+    const target = axialToPixel(unit.pos.q, unit.pos.r, HEX_SIZE);
+    const baseCenterX = gridBaseView.x + gridBaseView.width / 2;
+    const baseCenterY = gridBaseView.y + gridBaseView.height / 2;
+    gridCamera.panX = target.x - baseCenterX;
+    gridCamera.panY = target.y - baseCenterY;
+    applyGridCamera();
+}
+
+function nextUnorderedUnitFromSelection(): UnitView | null {
+    const missing = playerUnitsMissingOrders();
+    if (missing.length === 0) return null;
+    if (selectedUnitId == null) return missing[0];
+    const idx = missing.findIndex((u) => u.id === selectedUnitId);
+    if (idx < 0 || idx === missing.length - 1) return missing[0];
+    return missing[idx + 1];
+}
+
+function updateEndTurnReadyState(): void {
+    const ready = simInitialized && playerUnitsMissingOrders().length === 0;
+    stepBtn.classList.toggle("ready", ready);
 }
 
 function selectedPlayerUnit(): UnitView | null {
@@ -307,6 +346,127 @@ function validMoveTargetsFor(unit: UnitView): Set<string> {
         }
     }
     return targets;
+}
+
+function visibleCellsForUnits(teamId: TeamId, units: UnitView[]): Set<string> {
+    const visible = new Set<string>();
+    for (const ally of units.filter((u) => u.team_id === teamId && u.hp > 0)) {
+        for (const [cellId, cell] of gridCellMap?.entries() ?? []) {
+            const d = cubeDistanceFromAxial(ally.pos, { q: cell.q, r: cell.r });
+            if (d <= ally.visible_radius) {
+                visible.add(cellId);
+            }
+        }
+    }
+    return visible;
+}
+
+function visibleCellsFor(teamId: TeamId): Set<string> {
+    return visibleCellsForUnits(teamId, latestUnits);
+}
+
+function unitRenderAxial(unit: UnitView): { q: number; r: number } {
+    return playbackMotion.get(unit.id) ?? { q: unit.pos.q, r: unit.pos.r };
+}
+
+function pushDeathMarker(q: number, r: number): void {
+    deathMarkers.push({ q, r, expiresAt: performance.now() + 380 });
+    if (deathMarkerFrame != null) return;
+    const tick = () => {
+        deathMarkers = deathMarkers.filter((m) => m.expiresAt > performance.now());
+        renderGrid();
+        if (deathMarkers.length > 0) {
+            deathMarkerFrame = window.requestAnimationFrame(tick);
+        } else {
+            deathMarkerFrame = null;
+        }
+    };
+    deathMarkerFrame = window.requestAnimationFrame(tick);
+}
+
+async function animateMoveEventsBatch(
+    moves: Array<{ unit_id: number; from: { q: number; r: number }; to: { q: number; r: number } }>,
+): Promise<void> {
+    if (moves.length === 0) return;
+    const durationMs = 220;
+    const startTime = performance.now();
+    await new Promise<void>((resolve) => {
+        const tick = (now: number) => {
+            const t = Math.max(0, Math.min(1, (now - startTime) / durationMs));
+            for (const move of moves) {
+                playbackMotion.set(move.unit_id, {
+                    q: move.from.q + (move.to.q - move.from.q) * t,
+                    r: move.from.r + (move.to.r - move.from.r) * t,
+                });
+            }
+            renderGrid();
+            if (t < 1) {
+                window.requestAnimationFrame(tick);
+            } else {
+                for (const move of moves) {
+                    playbackMotion.delete(move.unit_id);
+                }
+                resolve();
+            }
+        };
+        window.requestAnimationFrame(tick);
+    });
+}
+
+async function animateTurnResolution(
+    log: TurnLog,
+    previousUnits: UnitView[],
+    previousUnitPositions: Map<number, { q: number; r: number; cellId: string }>,
+): Promise<void> {
+    const events = log.events ?? [];
+    if (events.length === 0) return;
+    const viewMode = currentViewMode();
+    const previousVisible = viewMode === "global" ? null : visibleCellsForUnits(viewMode, previousUnits);
+    const currentVisible = viewMode === "global" ? null : visibleCellsForUnits(viewMode, latestUnits);
+
+    const moveByUnit = new Map<number, { from: { id: string; q: number; r: number }; to: { id: string; q: number; r: number } }>();
+    for (const event of events) {
+        if (event.type !== "unit_moved") continue;
+        const existing = moveByUnit.get(event.unit_id);
+        if (!existing) {
+            moveByUnit.set(event.unit_id, { from: event.from, to: event.to });
+        } else {
+            existing.to = event.to;
+        }
+    }
+
+    const visibleMoves = [...moveByUnit.entries()]
+        .map(([unit_id, move]) => ({ unit_id, move }))
+        .filter(({ move }) => {
+            if (!previousVisible || !currentVisible) return false;
+            const fromVisible = previousVisible.has(move.from.id);
+            const toVisible = currentVisible.has(move.to.id);
+            return fromVisible || toVisible;
+        })
+        .map(({ unit_id, move }) => ({
+            unit_id,
+            from: { q: move.from.q, r: move.from.r },
+            to: { q: move.to.q, r: move.to.r },
+        }));
+    await animateMoveEventsBatch(visibleMoves);
+
+    const destroyedIds = events
+        .filter((e): e is Extract<SimEvent, { type: "unit_destroyed" }> => e.type === "unit_destroyed")
+        .map((e) => e.unit_id);
+    for (const unitId of destroyedIds) {
+        const pos = previousUnitPositions.get(unitId);
+        if (!pos) continue;
+        if (previousVisible && currentVisible) {
+            const wasVisible = previousVisible.has(pos.cellId);
+            const nowVisible = currentVisible.has(pos.cellId);
+            if (!wasVisible && !nowVisible) continue;
+        } else {
+            continue;
+        }
+        pushDeathMarker(pos.q, pos.r);
+        await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    renderGrid();
 }
 
 function cellContentsSummary(cellId: string): string {
@@ -428,6 +588,16 @@ function regularPolygonPoints(x: number, y: number, size: number, sides: number,
         points.push(`${px.toFixed(2)},${py.toFixed(2)}`);
     }
     return points.join(" ");
+}
+
+function directionalTrianglePoints(x: number, y: number, size: number, angleRad: number): string {
+    const tipX = x + Math.cos(angleRad) * size;
+    const tipY = y + Math.sin(angleRad) * size;
+    const leftX = x + Math.cos(angleRad + (2.45 * Math.PI) / 3) * size * 0.82;
+    const leftY = y + Math.sin(angleRad + (2.45 * Math.PI) / 3) * size * 0.82;
+    const rightX = x + Math.cos(angleRad - (2.45 * Math.PI) / 3) * size * 0.82;
+    const rightY = y + Math.sin(angleRad - (2.45 * Math.PI) / 3) * size * 0.82;
+    return `${tipX.toFixed(2)},${tipY.toFixed(2)} ${leftX.toFixed(2)},${leftY.toFixed(2)} ${rightX.toFixed(2)},${rightY.toFixed(2)}`;
 }
 
 function clearSvg(svg: SVGSVGElement): void {
@@ -597,14 +767,22 @@ function renderGrid(): void {
     applyGridCamera();
 
     const svgNs = "http://www.w3.org/2000/svg";
+    const viewMode = currentViewMode();
+    const visibleCells = viewMode === "global" ? null : visibleCellsFor(viewMode);
     const selected = selectedPlayerUnit();
     const validTargets = selected ? validMoveTargetsFor(selected) : new Set<string>();
+    const posByCellId = new Map(positions.map((p) => [p.cell.id, p]));
     for (const pos of positions) {
         const belief = beliefMap?.get(pos.cell.id);
         const lootBelief = belief?.loot ?? 0;
         const teamSignal = belief?.teamSignal ?? new Map<TeamId, number>();
         const renderLootBelief = lootBelief >= LOOT_BELIEF_RENDER_THRESHOLD ? lootBelief : 0;
-        const fill = belief ? beliefFill(renderLootBelief, teamSignal) : "rgba(12, 18, 32, 0.8)";
+        const isVisible = visibleCells == null || visibleCells.has(pos.cell.id);
+        const fill = isVisible
+            ? belief
+                ? beliefFill(renderLootBelief, teamSignal)
+                : "rgba(12, 18, 32, 0.8)"
+            : beliefFogFill(lootBelief, teamSignal);
         const poly = document.createElementNS(svgNs, "polygon");
         poly.setAttribute("points", hexPoints(pos.x, pos.y, HEX_SIZE));
         poly.setAttribute("fill", fill);
@@ -616,7 +794,9 @@ function renderGrid(): void {
                 ? "rgba(232, 236, 255, 0.95)"
                 : isValidTarget
                   ? "rgba(244, 201, 122, 0.95)"
-                  : "rgba(94, 208, 255, 0.35)",
+                  : isVisible
+                    ? "rgba(94, 208, 255, 0.35)"
+                    : "rgba(36, 52, 76, 0.65)",
         );
         poly.setAttribute("stroke-width", isHovered ? "2.2" : isValidTarget ? "1.9" : "1");
         poly.style.cursor = "pointer";
@@ -641,6 +821,55 @@ function renderGrid(): void {
             planMoveForSelectedUnit(pos.cell.id);
         });
         gridSvg.appendChild(poly);
+    }
+
+    if (visibleCells != null) {
+        const visiblePos = [...visibleCells]
+            .map((id) => posByCellId.get(id))
+            .filter((p): p is (typeof positions)[number] => p != null);
+        const hiddenCandidates = positions
+            .filter((p) => !visibleCells.has(p.cell.id))
+            .map((p) => {
+                const belief = beliefMap?.get(p.cell.id);
+                const loot = belief?.loot ?? 0;
+                const enemy = Math.max(...(belief ? [...belief.teamSignal.values()] : [0]));
+                return { pos: p, loot, enemy, score: Math.max(loot, enemy) };
+            })
+            .filter((c) => c.score >= 0.06)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 60);
+
+        for (const candidate of hiddenCandidates) {
+            let nearestVisible: (typeof positions)[number] | null = null;
+            let nearestDist = Number.POSITIVE_INFINITY;
+            for (const vp of visiblePos) {
+                const d = cubeDistanceFromAxial(candidate.pos.cell, vp.cell);
+                if (d < nearestDist) {
+                    nearestDist = d;
+                    nearestVisible = vp;
+                }
+            }
+            if (!nearestVisible || nearestDist > 2) continue;
+
+            const dx = candidate.pos.x - nearestVisible.x;
+            const dy = candidate.pos.y - nearestVisible.y;
+            const angle = Math.atan2(dy, dx);
+            const strength = Math.max(0.06, Math.min(1, candidate.score));
+            const sizeScale = 0.42 + strength * 0.9;
+            const alpha = 0.82;
+            // Push marker beyond the visible cell edge into fog space.
+            const hintX = nearestVisible.x + Math.cos(angle) * HEX_SIZE * 1.08;
+            const hintY = nearestVisible.y + Math.sin(angle) * HEX_SIZE * 1.08;
+            const hint = document.createElementNS(svgNs, "polygon");
+            hint.setAttribute("points", directionalTrianglePoints(hintX, hintY, HEX_SIZE * 0.16 * sizeScale, angle));
+            if (candidate.enemy >= candidate.loot) {
+                hint.setAttribute("fill", `rgba(242, 99, 99, ${alpha.toFixed(2)})`);
+            } else {
+                hint.setAttribute("fill", `rgba(244, 201, 122, ${alpha.toFixed(2)})`);
+            }
+            hint.style.pointerEvents = "none";
+            gridSvg.appendChild(hint);
+        }
     }
 
     const plannedCells = new Set<number>([...plannedMoves.values()]);
@@ -721,8 +950,10 @@ function renderGrid(): void {
         if (!attacker || !target) {
             continue;
         }
-        const from = axialToPixel(attacker.pos.q, attacker.pos.r, HEX_SIZE);
-        const to = axialToPixel(target.pos.q, target.pos.r, HEX_SIZE);
+        const attackerPos = unitRenderAxial(attacker);
+        const targetPos = unitRenderAxial(target);
+        const from = axialToPixel(attackerPos.q, attackerPos.r, HEX_SIZE);
+        const to = axialToPixel(targetPos.q, targetPos.r, HEX_SIZE);
         const line = document.createElementNS(svgNs, "line");
         line.setAttribute("x1", from.x.toString());
         line.setAttribute("y1", from.y.toString());
@@ -738,10 +969,11 @@ function renderGrid(): void {
     }
 
     for (const unit of displayedUnits) {
-        const { x, y } = axialToPixel(unit.pos.q, unit.pos.r, HEX_SIZE);
+        const renderedPos = unitRenderAxial(unit);
+        const { x, y } = axialToPixel(renderedPos.q, renderedPos.r, HEX_SIZE);
         const dead = unit.hp <= 0;
         const color = dead ? "#8b94a1" : teamColor(unit.team_id, 0.95);
-        const fill = dead ? "rgba(95, 103, 118, 0.45)" : "rgba(10, 16, 30, 0.75)";
+        const fill = dead ? "rgba(95, 103, 118, 0.45)" : teamColor(unit.team_id, 0.38);
         const strokeWidth = dead ? "1.6" : "2";
 
         const hpMax = Math.max(1, unitMaxHp(unit.archetype));
@@ -776,6 +1008,31 @@ function renderGrid(): void {
         hpFg.style.pointerEvents = "none";
         gridSvg.appendChild(hpFg);
 
+        // Discrete inventory pips below the unit body.
+        const slots = Math.max(0, unit.inventory_slots);
+        if (slots > 0) {
+            const gap = 1.2;
+            const maxWidth = HEX_SIZE * 0.96;
+            const pip = Math.max(1.8, Math.min(4.2, (maxWidth - (slots - 1) * gap) / slots));
+            const totalWidth = slots * pip + (slots - 1) * gap;
+            const startX = x - totalWidth / 2;
+            const yInv = y + HEX_SIZE * 0.62;
+            for (let i = 0; i < slots; i += 1) {
+                const filled = i < unit.inventory_used;
+                const rect = document.createElementNS(svgNs, "rect");
+                rect.setAttribute("x", (startX + i * (pip + gap)).toFixed(2));
+                rect.setAttribute("y", yInv.toFixed(2));
+                rect.setAttribute("width", pip.toFixed(2));
+                rect.setAttribute("height", "2.6");
+                rect.setAttribute("rx", "0.9");
+                rect.setAttribute("fill", filled ? "rgba(94, 208, 255, 0.9)" : "rgba(16, 24, 40, 0.9)");
+                rect.setAttribute("stroke", "rgba(232, 236, 255, 0.32)");
+                rect.setAttribute("stroke-width", "0.35");
+                rect.style.pointerEvents = "none";
+                gridSvg.appendChild(rect);
+            }
+        }
+
         if (unit.archetype === "scout") {
             const tri = document.createElementNS(svgNs, "polygon");
             tri.setAttribute("points", regularPolygonPoints(x, y, HEX_SIZE * 0.45, 3));
@@ -799,24 +1056,6 @@ function renderGrid(): void {
             gridSvg.appendChild(box);
         }
 
-        const label = document.createElementNS(svgNs, "text");
-        label.setAttribute("x", x.toString());
-        label.setAttribute("y", (y + 1).toString());
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("dominant-baseline", "middle");
-        label.setAttribute("fill", dead ? "#c5c9d1" : "#e8ecff");
-        label.textContent = `${teamBadge(unit.team_id)}${unit.id}`;
-        if (selectedUnitId === unit.id) {
-            label.setAttribute("font-weight", "700");
-            label.setAttribute("fill", "#f4c97a");
-        }
-        if (unit.team_id === playerTeamId && unit.hp > 0) {
-            label.style.pointerEvents = "none";
-        } else {
-            label.style.pointerEvents = "none";
-        }
-        gridSvg.appendChild(label);
-
         if (selectedUnitId === unit.id) {
             const rangeRing = document.createElementNS(svgNs, "circle");
             rangeRing.setAttribute("cx", x.toString());
@@ -829,6 +1068,21 @@ function renderGrid(): void {
             rangeRing.style.pointerEvents = "none";
             gridSvg.appendChild(rangeRing);
         }
+    }
+
+    for (const marker of deathMarkers) {
+        const { x, y } = axialToPixel(marker.q, marker.r, HEX_SIZE);
+        const life = Math.max(0, Math.min(1, (marker.expiresAt - performance.now()) / 380));
+        const radius = HEX_SIZE * (0.25 + (1 - life) * 0.28);
+        const ring = document.createElementNS(svgNs, "circle");
+        ring.setAttribute("cx", x.toString());
+        ring.setAttribute("cy", y.toString());
+        ring.setAttribute("r", radius.toFixed(2));
+        ring.setAttribute("fill", "none");
+        ring.setAttribute("stroke", `rgba(242, 99, 99, ${(life * 0.9).toFixed(2)})`);
+        ring.setAttribute("stroke-width", "1.8");
+        ring.style.pointerEvents = "none";
+        gridSvg.appendChild(ring);
     }
 }
 
@@ -873,6 +1127,27 @@ function beliefFill(loot: number, teamSignal: Map<TeamId, number>): string {
 
     const fillAlpha = 0.55 + 0.35 * Math.max(lootT, strongestSignal);
     return `rgba(${mixed.r}, ${mixed.g}, ${mixed.b}, ${fillAlpha.toFixed(2)})`;
+}
+
+function beliefFogFill(loot: number, teamSignal: Map<TeamId, number>): string {
+    const lootT = clamp01((loot - BASE_LOOT_PRIOR) / (1 - BASE_LOOT_PRIOR));
+    let strongestSignal = 0;
+    for (const raw of teamSignal.values()) {
+        const normalized = clamp01((raw - BASE_ENEMY_PRIOR) / (1 - BASE_ENEMY_PRIOR));
+        strongestSignal = Math.max(strongestSignal, normalized);
+    }
+    const strength = Math.max(lootT, strongestSignal);
+    if (strength <= 0.06) return "rgba(2, 6, 14, 0.94)";
+
+    const base = { r: 2, g: 6, b: 14 };
+    const lootColor = { r: 244, g: 201, b: 122 };
+    const hostileColor = { r: 242, g: 99, b: 99 };
+    const dominant = strongestSignal >= lootT ? hostileColor : lootColor;
+    const mix = 0.14 + strength * 0.22;
+    const r = mixChannel(base.r, dominant.r, mix);
+    const g = mixChannel(base.g, dominant.g, mix);
+    const b = mixChannel(base.b, dominant.b, mix);
+    return `rgba(${r}, ${g}, ${b}, 0.94)`;
 }
 
 function initSim(): void {
@@ -1075,8 +1350,9 @@ function renderBeliefs(beliefs: TeamBeliefView[], view: ViewMode): void {
     }
 }
 
-function stepSim(): void {
-    if (!wasmReady || !simInitialized) return;
+async function stepSim(): Promise<void> {
+    if (!wasmReady || !simInitialized || resolvingTurn) return;
+    resolvingTurn = true;
     try {
         const expectedRevision = revision();
         const intent = buildPlayerTurnIntent();
@@ -1107,6 +1383,10 @@ function stepSim(): void {
         }
 
         const log = reply.resolved_turn;
+        const previousUnits = latestUnits;
+        const previousUnitPositions = new Map(
+            previousUnits.map((u) => [u.id, { q: u.pos.q, r: u.pos.r, cellId: u.pos.id }]),
+        );
         for (const action of intent.unit_intents) {
             if (action.type === "move") {
                 plannedMoves.delete(action.unit_id);
@@ -1137,10 +1417,13 @@ function stepSim(): void {
         latestGridRadius = typeof log.grid_radius === "number" ? log.grid_radius : null;
         renderLog(log);
         renderPerspective();
+        await animateTurnResolution(log, previousUnits, previousUnitPositions);
         updateStatus(`Turn ${log.turn} resolved at revision ${reply.revision}.`);
     } catch (err) {
         updateStatus(`Command error: ${(err as Error).message}`);
         setRunning(false);
+    } finally {
+        resolvingTurn = false;
     }
 }
 
@@ -1159,7 +1442,19 @@ async function boot(): Promise<void> {
 
 initBtn.addEventListener("click", () => initSim());
 newSimBtn.addEventListener("click", () => setInitModalOpen(true));
-stepBtn.addEventListener("click", () => stepSim());
+stepBtn.addEventListener("click", () => {
+    const nextMissing = nextUnorderedUnitFromSelection();
+    if (nextMissing) {
+        selectUnit(nextMissing.id);
+        focusUnitInGrid(nextMissing);
+        const remaining = playerUnitsMissingOrders().length;
+        updateStatus(
+            `Unit ${nextMissing.id} has no order yet (${remaining} unit${remaining === 1 ? "" : "s"} pending).`,
+        );
+        return;
+    }
+    void stepSim();
+});
 runBtn.addEventListener("click", () => setRunning(!running));
 clearBtn.addEventListener("click", () => {
     clearLog();

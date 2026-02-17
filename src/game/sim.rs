@@ -274,7 +274,7 @@ const TEAM_PALETTE: [(&str, TeamColor); 8] = [
     ("Orchid", TeamColor { r: 204, g: 121, b: 167 }),
     ("Sky", TeamColor { r: 86, g: 180, b: 233 }),
     ("Crimson", TeamColor { r: 220, g: 50, b: 47 }),
-    ("Mint", TeamColor { r: 102, g: 194, b: 165 }),
+    ("Mint", TeamColor { r: 141, g: 211, b: 80 }),
 ];
 
 fn build_team_states<R: Rng>(rng: &mut R, config: &SimConfig) -> Vec<TeamState> {
@@ -508,6 +508,7 @@ impl SimState {
             command_history: HashMap::new(),
         };
         state.spawn_defaults(rng);
+        state.initialize_starting_beliefs(rng);
         state
     }
 
@@ -780,6 +781,13 @@ impl SimState {
             let pos = self.random_cell(rng);
             self.spawn_loot(rng, pos);
         }
+    }
+
+    fn initialize_starting_beliefs<R: Rng>(&mut self, rng: &mut R) {
+        // Seed beliefs immediately so turn 0 snapshot already reflects passive + visual intel.
+        let mut ignored_events = Vec::new();
+        self.apply_visual_scans(&mut ignored_events);
+        self.apply_passive_scans(rng, &mut ignored_events);
     }
 
     fn spawn_unit(
@@ -2223,6 +2231,23 @@ mod sim_tests {
         assert_eq!(decision.intent_kind, DecisionIntent::Retreat);
         assert!(matches!(decision.intent, MovementIntent::Toward(_)));
         assert!(decision.reason.contains("weak signals"));
+    }
+
+    #[test]
+    fn new_state_applies_starting_passive_and_visual_scans() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1234);
+        let sim = SimState::new(&mut rng, test_config());
+
+        let any_non_prior = sim.knowledge.iter().any(|team_knowledge| {
+            team_knowledge
+                .beliefs
+                .iter()
+                .any(|belief| belief.enemy != BASE_ENEMY_PRIOR || belief.loot != BASE_LOOT_PRIOR)
+        });
+        assert!(
+            any_non_prior,
+            "expected at least one belief to differ from priors at init due to startup scans"
+        );
     }
 
     #[test]
