@@ -1427,6 +1427,20 @@ async function stepSim(): Promise<void> {
     }
 }
 
+function requestEndTurn(): void {
+    const nextMissing = nextUnorderedUnitFromSelection();
+    if (nextMissing) {
+        selectUnit(nextMissing.id);
+        focusUnitInGrid(nextMissing);
+        const remaining = playerUnitsMissingOrders().length;
+        updateStatus(
+            `Unit ${nextMissing.id} has no order yet (${remaining} unit${remaining === 1 ? "" : "s"} pending).`,
+        );
+        return;
+    }
+    void stepSim();
+}
+
 async function boot(): Promise<void> {
     await initWasm();
     wasmReady = true;
@@ -1442,18 +1456,24 @@ async function boot(): Promise<void> {
 
 initBtn.addEventListener("click", () => initSim());
 newSimBtn.addEventListener("click", () => setInitModalOpen(true));
-stepBtn.addEventListener("click", () => {
-    const nextMissing = nextUnorderedUnitFromSelection();
-    if (nextMissing) {
-        selectUnit(nextMissing.id);
-        focusUnitInGrid(nextMissing);
-        const remaining = playerUnitsMissingOrders().length;
-        updateStatus(
-            `Unit ${nextMissing.id} has no order yet (${remaining} unit${remaining === 1 ? "" : "s"} pending).`,
-        );
+stepBtn.addEventListener("click", () => requestEndTurn());
+window.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
         return;
     }
-    void stepSim();
+    const active = document.activeElement as HTMLElement | null;
+    const tag = active?.tagName;
+    if (
+        active?.isContentEditable ||
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        stepBtn.disabled
+    ) {
+        return;
+    }
+    event.preventDefault();
+    requestEndTurn();
 });
 runBtn.addEventListener("click", () => setRunning(!running));
 clearBtn.addEventListener("click", () => {
