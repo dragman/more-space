@@ -1195,9 +1195,6 @@ impl SimState {
     fn resolve_exits(&mut self, events: &mut Vec<SimEvent>) {
         let mut exited: Vec<(u32, u32)> = Vec::new();
         for unit in &self.units {
-            if !self.ai.inventory_full(unit) {
-                continue;
-            }
             if let Some(exit_idx) = self.exits.iter().position(|exit_pos| *exit_pos == unit.pos) {
                 exited.push((unit.id, (exit_idx + 1) as u32));
             }

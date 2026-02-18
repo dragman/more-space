@@ -776,13 +776,8 @@ function renderGrid(): void {
         const belief = beliefMap?.get(pos.cell.id);
         const lootBelief = belief?.loot ?? 0;
         const teamSignal = belief?.teamSignal ?? new Map<TeamId, number>();
-        const renderLootBelief = lootBelief >= LOOT_BELIEF_RENDER_THRESHOLD ? lootBelief : 0;
         const isVisible = visibleCells == null || visibleCells.has(pos.cell.id);
-        const fill = isVisible
-            ? belief
-                ? beliefFill(renderLootBelief, teamSignal)
-                : "rgba(12, 18, 32, 0.8)"
-            : beliefFogFill(lootBelief, teamSignal);
+        const fill = isVisible ? "rgba(12, 18, 32, 0.8)" : beliefFogFill(lootBelief, teamSignal);
         const poly = document.createElementNS(svgNs, "polygon");
         poly.setAttribute("points", hexPoints(pos.x, pos.y, HEX_SIZE));
         poly.setAttribute("fill", fill);
@@ -930,6 +925,7 @@ function renderGrid(): void {
         marker.setAttribute("fill", "rgba(244, 201, 122, 0.95)");
         marker.setAttribute("stroke", "rgba(35, 23, 8, 0.95)");
         marker.setAttribute("stroke-width", "1.4");
+        marker.style.pointerEvents = "none";
         gridSvg.appendChild(marker);
     }
 
@@ -940,6 +936,7 @@ function renderGrid(): void {
         marker.setAttribute("fill", "rgba(129, 236, 162, 0.95)");
         marker.setAttribute("stroke", "rgba(12, 57, 26, 0.95)");
         marker.setAttribute("stroke-width", "1.6");
+        marker.style.pointerEvents = "none";
         gridSvg.appendChild(marker);
     }
 
@@ -965,6 +962,7 @@ function renderGrid(): void {
             line.setAttribute("stroke-dasharray", "4 3");
             line.setAttribute("opacity", "0.75");
         }
+        line.style.pointerEvents = "none";
         gridSvg.appendChild(line);
     }
 
@@ -1094,39 +1092,6 @@ function clamp01(v: number): number {
 
 function mixChannel(a: number, b: number, t: number): number {
     return Math.round(a + (b - a) * t);
-}
-
-function beliefFill(loot: number, teamSignal: Map<TeamId, number>): string {
-    const lootT = clamp01((loot - 0.2) / 0.8);
-
-    const base = { r: 12, g: 18, b: 32 };
-    const lootColor = { r: 244, g: 201, b: 122 };
-
-    let mixed = {
-        r: mixChannel(base.r, lootColor.r, lootT),
-        g: mixChannel(base.g, lootColor.g, lootT),
-        b: mixChannel(base.b, lootColor.b, lootT),
-    };
-    let strongestSignal = 0;
-    for (const [teamId, rawSignal] of teamSignal.entries()) {
-        const signal = clamp01(rawSignal);
-        if (signal <= 0) continue;
-        strongestSignal = Math.max(strongestSignal, signal);
-        const colorRef = teamById(teamId)?.color ?? { r: 150, g: 160, b: 180 };
-        const teamMix = {
-            r: mixChannel(base.r, colorRef.r, signal),
-            g: mixChannel(base.g, colorRef.g, signal),
-            b: mixChannel(base.b, colorRef.b, signal),
-        };
-        mixed = {
-            r: mixChannel(mixed.r, teamMix.r, signal),
-            g: mixChannel(mixed.g, teamMix.g, signal),
-            b: mixChannel(mixed.b, teamMix.b, signal),
-        };
-    }
-
-    const fillAlpha = 0.55 + 0.35 * Math.max(lootT, strongestSignal);
-    return `rgba(${mixed.r}, ${mixed.g}, ${mixed.b}, ${fillAlpha.toFixed(2)})`;
 }
 
 function beliefFogFill(loot: number, teamSignal: Map<TeamId, number>): string {
